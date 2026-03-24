@@ -26,6 +26,7 @@ pub struct AgentConfig {
     pub max_iterations: usize,
     pub max_tool_calls_per_iteration: usize,
     pub consolidation_threshold: usize,
+    pub memory_max_bytes: usize,
 }
 
 /// Input to the agent — all sources normalize to this.
@@ -64,6 +65,7 @@ impl Agent {
             max_iterations: config.agent.max_iterations,
             max_tool_calls_per_iteration: config.agent.max_tool_calls_per_iteration,
             consolidation_threshold: config.agent.consolidation_threshold,
+            memory_max_bytes: config.agent.memory_max_bytes,
         };
 
         Self {
@@ -84,15 +86,21 @@ impl Agent {
 
     /// Process one input. Called only by agent_worker task (sole owner).
     pub async fn process(&mut self, input: &Input) -> Result<Output> {
-        let session = self.session_store.get_or_load(&input.session_id);
-
-        // Consolidation deferred from previous turn
-        if session.needs_consolidation {
-            tracing::info!("Session {} needs consolidation (deferred to Phase 2)", input.session_id);
-            session.needs_consolidation = false;
+        // Consolidation deferred from previous turn — runs before new input
+        let needs_consolidation = {
+            let session = self.session_store.get_or_load(&input.session_id);
+            session.needs_consolidation
+        };
+        if needs_consolidation {
+            let session = self.session_store.get_or_load(&input.session_id);
+            self.memory
+                .consolidate(session, &*self.llm, self.config.memory_max_bytes)
+                .await
+                .ok(); // Non-fatal — logged inside
         }
 
         // Add user message
+        let session = self.session_store.get_or_load(&input.session_id);
         session.add_message(Role::User, &input.content);
 
         // ReAct loop
