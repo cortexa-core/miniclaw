@@ -36,6 +36,7 @@ pub struct Input {
 }
 
 /// Output from the agent.
+#[derive(Debug)]
 pub struct Output {
     pub content: String,
     pub usage: Option<Usage>,
