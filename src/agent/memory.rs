@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::llm::types::{ChatResponse, Message, MessageContent, Role, StopReason};
+use crate::llm::types::{ChatResponse, Context, Message, MessageContent, Role};
+use crate::llm::LlmProvider;
 use crate::tools::registry::ToolResult;
 
 // --- Session ---
@@ -170,11 +171,246 @@ impl MemoryManager {
         std::fs::write(&path, content)?;
         Ok(())
     }
+
+    /// Consolidate old messages from a session into MEMORY.md.
+    /// Takes the older half of messages, asks the LLM to summarize them,
+    /// appends the summary to MEMORY.md, and removes the old messages from the session.
+    pub async fn consolidate(
+        &self,
+        session: &mut Session,
+        llm: &dyn LlmProvider,
+        memory_max_bytes: usize,
+    ) -> Result<()> {
+        if session.messages.len() < 4 {
+            // Too few messages to consolidate
+            return Ok(());
+        }
+
+        let split_point = session.messages.len() / 2;
+        let old_messages = &session.messages[..split_point];
+
+        // Build a text representation of old messages for summarization
+        let conversation_text: String = old_messages
+            .iter()
+            .filter_map(|m| {
+                let role = match m.role {
+                    Role::User => "User",
+                    Role::Assistant => "Assistant",
+                    Role::Tool => return None, // skip tool results for summary
+                };
+                Some(format!("{}: {}", role, m.content_text()))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        if conversation_text.trim().is_empty() {
+            // Nothing meaningful to consolidate
+            session.messages = session.messages[split_point..].to_vec();
+            return Ok(());
+        }
+
+        tracing::info!(
+            "Consolidating session {} — summarizing {} messages",
+            session.id,
+            split_point
+        );
+
+        // Ask LLM to summarize
+        let summary_prompt = format!(
+            "Summarize the key facts, decisions, and user preferences from this conversation \
+             in concise bullet points. Only include information worth remembering long-term. \
+             Do NOT include greetings or trivial exchanges.\n\n{}",
+            conversation_text
+        );
+
+        let context = Context::simple_query(&summary_prompt);
+        let summary_response = llm.chat(&context).await;
+
+        match summary_response {
+            Ok(response) => {
+                if let Some(summary_text) = response.text {
+                    if !summary_text.trim().is_empty() {
+                        // Append summary to MEMORY.md
+                        let memory_path = self.data_dir.join("memory/MEMORY.md");
+                        let mut memory = std::fs::read_to_string(&memory_path).unwrap_or_default();
+                        let date = chrono::Local::now().format("%Y-%m-%d %H:%M");
+                        memory.push_str(&format!("\n\n### Consolidated {date}\n\n{summary_text}"));
+
+                        // Check if MEMORY.md exceeds max size
+                        if memory.len() > memory_max_bytes {
+                            tracing::info!(
+                                "MEMORY.md exceeds max size ({}B > {}B), reconsolidating",
+                                memory.len(),
+                                memory_max_bytes
+                            );
+                            memory = self.reconsolidate_memory(&memory, llm, memory_max_bytes).await;
+                        }
+
+                        std::fs::write(&memory_path, memory)?;
+                        tracing::info!("Consolidation summary written to MEMORY.md");
+                    }
+                }
+            }
+            Err(e) => {
+                // Consolidation failure is non-fatal — just log and continue
+                tracing::warn!("Consolidation LLM call failed: {e}. Skipping summary.");
+            }
+        }
+
+        // Remove old messages regardless of whether summarization succeeded.
+        // This prevents unbounded session growth even if the LLM is down.
+        session.messages = session.messages[split_point..].to_vec();
+        session.needs_consolidation = false;
+
+        Ok(())
+    }
+
+    /// When MEMORY.md exceeds max size, ask the LLM to condense it.
+    async fn reconsolidate_memory(
+        &self,
+        memory: &str,
+        llm: &dyn LlmProvider,
+        max_bytes: usize,
+    ) -> String {
+        let prompt = format!(
+            "Condense these notes into the most important facts only. \
+             Remove redundant, outdated, or trivial information. \
+             Keep it under {} characters:\n\n{}",
+            max_bytes / 2,
+            memory
+        );
+
+        let context = Context::simple_query(&prompt);
+        match llm.chat(&context).await {
+            Ok(response) => response.text.unwrap_or_else(|| memory.to_string()),
+            Err(e) => {
+                tracing::warn!("Memory reconsolidation failed: {e}. Keeping existing memory.");
+                memory.to_string()
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::llm::types::{ChatResponse, StopReason, Usage};
+
+    // --- Mock LLM for consolidation tests ---
+
+    struct MockConsolidationLlm {
+        response_text: String,
+    }
+
+    #[async_trait::async_trait]
+    impl LlmProvider for MockConsolidationLlm {
+        async fn chat(&self, _context: &Context) -> Result<ChatResponse> {
+            Ok(ChatResponse {
+                text: Some(self.response_text.clone()),
+                tool_calls: vec![],
+                stop_reason: StopReason::EndTurn,
+                usage: Usage::default(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn test_consolidation_basic() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("memory")).unwrap();
+        let mgr = MemoryManager::new(dir.path().to_path_buf());
+        let mock_llm = MockConsolidationLlm {
+            response_text: "- User name is Jiekai\n- Prefers Celsius".into(),
+        };
+
+        let mut session = Session::new("test");
+        // Add 10 messages
+        for i in 0..5 {
+            session.add_message(Role::User, &format!("Message {i}"));
+            session.add_message(Role::Assistant, &format!("Response {i}"));
+        }
+        assert_eq!(session.message_count(), 10);
+
+        mgr.consolidate(&mut session, &mock_llm, 8192).await.unwrap();
+
+        // Session should have only the recent half
+        assert_eq!(session.message_count(), 5);
+        // MEMORY.md should contain the summary
+        let memory = std::fs::read_to_string(dir.path().join("memory/MEMORY.md")).unwrap();
+        assert!(memory.contains("User name is Jiekai"));
+        assert!(memory.contains("Prefers Celsius"));
+        assert!(memory.contains("Consolidated"));
+    }
+
+    #[tokio::test]
+    async fn test_consolidation_too_few_messages() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("memory")).unwrap();
+        let mgr = MemoryManager::new(dir.path().to_path_buf());
+        let mock_llm = MockConsolidationLlm {
+            response_text: "should not be called".into(),
+        };
+
+        let mut session = Session::new("test");
+        session.add_message(Role::User, "Hi");
+        session.add_message(Role::Assistant, "Hello");
+
+        mgr.consolidate(&mut session, &mock_llm, 8192).await.unwrap();
+
+        // Should not consolidate — too few messages
+        assert_eq!(session.message_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_consolidation_memory_bounds() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("memory")).unwrap();
+
+        // Pre-fill MEMORY.md with existing content near the limit
+        let existing = "x".repeat(500);
+        std::fs::write(dir.path().join("memory/MEMORY.md"), &existing).unwrap();
+
+        let mgr = MemoryManager::new(dir.path().to_path_buf());
+        let mock_llm = MockConsolidationLlm {
+            response_text: "- Condensed facts here".into(),
+        };
+
+        let mut session = Session::new("test");
+        for i in 0..6 {
+            session.add_message(Role::User, &format!("Msg {i}"));
+            session.add_message(Role::Assistant, &format!("Reply {i}"));
+        }
+
+        // Set a very small max to trigger reconsolidation
+        mgr.consolidate(&mut session, &mock_llm, 100).await.unwrap();
+
+        // Memory was reconsolidated (the mock returns "Condensed facts here" for both calls)
+        let memory = std::fs::read_to_string(dir.path().join("memory/MEMORY.md")).unwrap();
+        assert!(memory.contains("Condensed facts"));
+        assert_eq!(session.message_count(), 6); // kept recent half
+    }
+
+    #[tokio::test]
+    async fn test_consolidation_clears_flag() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("memory")).unwrap();
+        let mgr = MemoryManager::new(dir.path().to_path_buf());
+        let mock_llm = MockConsolidationLlm {
+            response_text: "- Summary".into(),
+        };
+
+        let mut session = Session::new("test");
+        session.needs_consolidation = true;
+        for i in 0..6 {
+            session.add_message(Role::User, &format!("Msg {i}"));
+            session.add_message(Role::Assistant, &format!("Reply {i}"));
+        }
+
+        mgr.consolidate(&mut session, &mock_llm, 8192).await.unwrap();
+        assert!(!session.needs_consolidation);
+    }
+
+    // --- Original tests ---
 
     #[test]
     fn test_session_add_messages() {
