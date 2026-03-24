@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use super::registry::{Tool, ToolContext, ToolResult};
 
 /// Validate that a requested path doesn't escape the data directory.
-fn validate_path(data_dir: &Path, requested: &str) -> Result<PathBuf> {
+pub fn validate_path(data_dir: &Path, requested: &str) -> Result<PathBuf> {
     let requested = requested.trim_start_matches('/');
     let joined = data_dir.join(requested);
 
