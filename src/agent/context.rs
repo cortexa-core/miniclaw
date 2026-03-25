@@ -84,8 +84,9 @@ impl ContextBuilder {
         &mut self,
         session: &Session,
         tool_schemas: &[ToolSchema],
+        user_input: &str,
     ) -> Result<Context> {
-        // Reload from disk if cache expired or missing
+        // Reload static parts from disk if cache expired or missing
         let needs_reload = match &self.cached_system {
             None => true,
             Some(cached) => cached.loaded_at.elapsed() > self.ttl,
@@ -99,12 +100,21 @@ impl ContextBuilder {
             });
         }
 
-        let system = self
+        let mut system = self
             .cached_system
             .as_ref()
             .expect("cache was just populated above")
             .prompt
             .clone();
+
+        // Skills selected per-turn based on user input (not cached)
+        if let Some(ref skill_mgr) = self.skill_manager {
+            let skills = skill_mgr.select_for_prompt(self.budgets.skills_max, user_input);
+            if !skills.is_empty() {
+                system.push_str(&format!("\n\n---\n\n## Active Skills\n\n{skills}"));
+            }
+        }
+
         let messages = session.messages_for_context();
 
         Ok(Context {
@@ -157,13 +167,7 @@ impl ContextBuilder {
             parts.push(format!("## Recent Notes\n\n{truncated}"));
         }
 
-        // 6. Skills (via SkillManager with gating + budget)
-        if let Some(ref skill_mgr) = self.skill_manager {
-            let skills = skill_mgr.select_for_prompt(self.budgets.skills_max);
-            if !skills.is_empty() {
-                parts.push(format!("## Active Skills\n\n{skills}"));
-            }
-        }
+        // 6. Skills — injected per-turn in build(), not here (static cache)
 
         Ok(parts.join("\n\n---\n\n"))
     }
@@ -270,7 +274,7 @@ mod tests {
 
         let mut builder = ContextBuilder::new(dir.path().to_path_buf(), 60);
         let session = Session::new("test");
-        let ctx = builder.build(&session, &[]).unwrap();
+        let ctx = builder.build(&session, &[], "test").unwrap();
         assert!(ctx.system.contains("Test Agent"));
         assert!(ctx.system.contains("Device Context"));
     }
@@ -283,7 +287,7 @@ mod tests {
 
         let mut builder = ContextBuilder::new(dir.path().to_path_buf(), 60);
         let session = Session::new("test");
-        let ctx = builder.build(&session, &[]).unwrap();
+        let ctx = builder.build(&session, &[], "test").unwrap();
         assert!(ctx.system.contains("MiniClaw"));
         // Verify default SOUL.md was created
         assert!(dir.path().join("SOUL.md").exists());
@@ -299,10 +303,10 @@ mod tests {
         let mut builder = ContextBuilder::new(dir.path().to_path_buf(), 60);
         let session = Session::new("test");
 
-        let ctx1 = builder.build(&session, &[]).unwrap();
+        let ctx1 = builder.build(&session, &[], "test").unwrap();
         // Modify file — cache should still return V1
         std::fs::write(dir.path().join("SOUL.md"), "# V2").unwrap();
-        let ctx2 = builder.build(&session, &[]).unwrap();
+        let ctx2 = builder.build(&session, &[], "test").unwrap();
         assert_eq!(ctx1.system, ctx2.system); // cached
     }
 }

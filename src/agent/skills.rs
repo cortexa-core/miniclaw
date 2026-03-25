@@ -86,11 +86,31 @@ impl SkillManager {
         Self { skills }
     }
 
-    /// Select skills to inject into the system prompt, respecting budget
-    pub fn select_for_prompt(&self, max_bytes: usize) -> String {
+    /// Select skills to inject into the system prompt, respecting budget.
+    /// Skills are scored dynamically based on relevance to the user's input.
+    /// `always` skills are injected first regardless of input.
+    pub fn select_for_prompt(&self, max_bytes: usize, user_input: &str) -> String {
         if self.skills.is_empty() {
             return String::new();
         }
+
+        // Score each skill: always skills first, then by dynamic relevance
+        let mut scored: Vec<(&Skill, f32)> = self
+            .skills
+            .iter()
+            .map(|skill| {
+                let score = if skill.always {
+                    f32::MAX // always skills go first
+                } else {
+                    Self::relevance_score(skill, user_input)
+                };
+                (skill, score)
+            })
+            .filter(|(skill, score)| skill.always || *score > 0.0)
+            .collect();
+
+        // Sort by score descending
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         let mut parts = Vec::new();
         let mut remaining = max_bytes;
@@ -99,7 +119,7 @@ impl SkillManager {
         let always_budget = max_bytes / 2;
         let mut always_used = 0;
 
-        for skill in &self.skills {
+        for (skill, score) in &scored {
             let entry = format!("### {}\n\n{}", skill.name, skill.content);
             let entry_bytes = entry.len();
 
@@ -108,15 +128,14 @@ impl SkillManager {
                     parts.push(entry);
                     always_used += entry_bytes;
                     remaining -= entry_bytes;
-                } else {
-                    tracing::debug!("Skill '{}' (always) exceeds always-budget, skipping", skill.name);
                 }
             } else if entry_bytes <= remaining {
+                tracing::debug!(
+                    "Skill '{}' selected (relevance={:.1}, priority={})",
+                    skill.name, score, skill.priority
+                );
                 parts.push(entry);
                 remaining -= entry_bytes;
-            } else {
-                tracing::debug!("Skill '{}' exceeds remaining budget ({entry_bytes}B > {remaining}B), skipping",
-                    skill.name);
             }
         }
 
@@ -125,6 +144,49 @@ impl SkillManager {
         }
 
         parts.join("\n\n---\n\n")
+    }
+
+    /// Compute relevance score for a skill against user input.
+    /// Combines tag matching (70% weight) with base priority (30% weight).
+    /// Compute relevance score. Returns 0.0 if no tags or description words match,
+    /// regardless of base priority. This ensures irrelevant skills are never injected.
+    fn relevance_score(skill: &Skill, user_input: &str) -> f32 {
+        let input_lower = user_input.to_lowercase();
+
+        // Tag matching: how many skill tags appear in the user's message
+        let tag_matches = if skill.tags.is_empty() {
+            0
+        } else {
+            skill.tags
+                .iter()
+                .filter(|tag| input_lower.contains(&tag.to_lowercase()))
+                .count()
+        };
+
+        // Description word matching: keywords from description in input
+        let desc_matches = skill
+            .description
+            .split_whitespace()
+            .filter(|word| word.len() > 3)
+            .filter(|word| input_lower.contains(&word.to_lowercase()))
+            .count();
+
+        // No matches at all → score 0, skill won't be selected
+        if tag_matches == 0 && desc_matches == 0 {
+            return 0.0;
+        }
+
+        let tag_score = if skill.tags.is_empty() {
+            0.0
+        } else {
+            (tag_matches as f32 / skill.tags.len() as f32) * 100.0
+        };
+        let desc_score = desc_matches as f32 * 10.0;
+        let relevance = tag_score + desc_score;
+        let base = skill.priority as f32;
+
+        // Weighted: relevance matters more, base priority breaks ties
+        relevance * 0.7 + base * 0.3
     }
 
     /// Get the number of loaded skills
@@ -387,8 +449,8 @@ Won't load."#).unwrap();
                 },
                 Skill {
                     name: "high-priority".into(),
-                    description: "".into(),
-                    tags: vec![],
+                    description: "Relevant testing skill".into(),
+                    tags: vec!["test".into(), "query".into()],
                     priority: 80,
                     always: false,
                     content: "High priority content here.".into(),
@@ -396,8 +458,8 @@ Won't load."#).unwrap();
                 },
                 Skill {
                     name: "too-big".into(),
-                    description: "".into(),
-                    tags: vec![],
+                    description: "Also relevant but huge".into(),
+                    tags: vec!["test".into()],
                     priority: 70,
                     always: false,
                     content: "x".repeat(5000),
@@ -406,7 +468,7 @@ Won't load."#).unwrap();
             ],
         };
 
-        let result = mgr.select_for_prompt(500);
+        let result = mgr.select_for_prompt(500, "test query");
         assert!(result.contains("always-skill"));
         assert!(result.contains("high-priority"));
         assert!(!result.contains("too-big"));
@@ -444,6 +506,97 @@ Always content."#).unwrap();
         assert_eq!(mgr.skills[0].name, "always-on");
         assert_eq!(mgr.skills[1].name, "high-priority");
         assert_eq!(mgr.skills[2].name, "low-priority");
+    }
+
+    #[test]
+    fn test_relevance_scoring() {
+        let skill = Skill {
+            name: "garden".into(),
+            description: "Monitor garden sensors".into(),
+            tags: vec!["garden".into(), "plants".into(), "soil".into(), "moisture".into()],
+            priority: 50,
+            always: false,
+            content: "Garden instructions.".into(),
+            source_path: PathBuf::new(),
+        };
+
+        // Relevant input — matches tags
+        let score = SkillManager::relevance_score(&skill, "how are my plants doing?");
+        assert!(score > 0.0, "Should match 'plants' tag, got {score}");
+
+        // Very relevant — multiple tag matches
+        let score2 = SkillManager::relevance_score(&skill, "check soil moisture in the garden");
+        assert!(score2 > score, "More matches should score higher: {score2} vs {score}");
+
+        // Irrelevant input — no tag matches → score 0
+        let score3 = SkillManager::relevance_score(&skill, "what time is it?");
+        assert_eq!(score3, 0.0, "No tag matches should return 0: {score3}");
+    }
+
+    #[test]
+    fn test_dynamic_selection_by_input() {
+        let mgr = SkillManager {
+            skills: vec![
+                Skill {
+                    name: "garden".into(),
+                    description: "Garden monitoring".into(),
+                    tags: vec!["garden".into(), "plants".into()],
+                    priority: 50,
+                    always: false,
+                    content: "Water the plants when soil is dry.".into(),
+                    source_path: PathBuf::new(),
+                },
+                Skill {
+                    name: "system".into(),
+                    description: "System health monitoring".into(),
+                    tags: vec!["system".into(), "cpu".into(), "disk".into()],
+                    priority: 50,
+                    always: false,
+                    content: "Check disk space and CPU usage.".into(),
+                    source_path: PathBuf::new(),
+                },
+            ],
+        };
+
+        // Garden query → garden skill selected, not system
+        let result = mgr.select_for_prompt(2000, "how are my plants?");
+        assert!(result.contains("garden"), "Should contain garden skill");
+        assert!(!result.contains("system"), "Should NOT contain system skill for plant query");
+
+        // System query → system skill selected, not garden
+        let result = mgr.select_for_prompt(2000, "check disk space");
+        assert!(result.contains("system"), "Should contain system skill");
+        assert!(!result.contains("garden"), "Should NOT contain garden skill for disk query");
+    }
+
+    #[test]
+    fn test_always_skills_always_included() {
+        let mgr = SkillManager {
+            skills: vec![
+                Skill {
+                    name: "always-on".into(),
+                    description: "Core behavior".into(),
+                    tags: vec![],
+                    priority: 90,
+                    always: true,
+                    content: "Always do this.".into(),
+                    source_path: PathBuf::new(),
+                },
+                Skill {
+                    name: "niche-skill".into(),
+                    description: "Specific domain".into(),
+                    tags: vec!["quantum".into(), "physics".into()],
+                    priority: 50,
+                    always: false,
+                    content: "Quantum physics instructions.".into(),
+                    source_path: PathBuf::new(),
+                },
+            ],
+        };
+
+        let result = mgr.select_for_prompt(2000, "completely unrelated query");
+        assert!(result.contains("always-on"), "Always skills must be included");
+        assert!(!result.contains("niche-skill"), "Non-matching skills excluded");
     }
 
     #[test]
