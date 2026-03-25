@@ -262,9 +262,14 @@ impl MemoryManager {
             }
         }
 
-        // Remove old messages regardless of whether summarization succeeded.
-        // This prevents unbounded session growth even if the LLM is down.
-        session.messages = session.messages[split_point..].to_vec();
+        // Remove old messages. Find a clean split point that doesn't orphan
+        // tool results (which must follow their assistant tool_use message).
+        let clean_split = find_clean_split_point(&session.messages, split_point);
+        session.messages = session.messages[clean_split..].to_vec();
+
+        // Strip any remaining orphaned tool messages at the start
+        strip_orphaned_tool_messages(&mut session.messages);
+
         session.needs_consolidation = false;
 
         Ok(())
@@ -296,10 +301,51 @@ impl MemoryManager {
     }
 }
 
+/// Find a split point that doesn't break tool call/result pairs.
+/// Walks backward from the desired split point to find a User message boundary.
+fn find_clean_split_point(messages: &[Message], desired: usize) -> usize {
+    // Walk backward from desired split to find a User message.
+    // User messages are always safe split points — they don't depend on prior tool_use.
+    let mut point = desired;
+    while point > 0 {
+        if matches!(messages[point].role, Role::User) {
+            return point;
+        }
+        point -= 1;
+    }
+    // Fallback: if no user message found, use the desired point
+    desired
+}
+
+/// Remove orphaned tool result messages at the start of the message list.
+/// A tool result is orphaned if there's no preceding assistant ToolUse message.
+fn strip_orphaned_tool_messages(messages: &mut Vec<Message>) {
+    // Remove leading messages that are Tool role (orphaned results)
+    // or Assistant ToolUse without their tool results completing
+    while !messages.is_empty() {
+        match &messages[0].role {
+            Role::Tool => {
+                tracing::debug!("Stripping orphaned tool result message");
+                messages.remove(0);
+            }
+            Role::Assistant => {
+                // If it's a ToolUse message with no following Tool results, strip it too
+                if matches!(&messages[0].content, MessageContent::ToolUse { .. }) {
+                    tracing::debug!("Stripping orphaned assistant tool_use message");
+                    messages.remove(0);
+                } else {
+                    break;
+                }
+            }
+            Role::User => break,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::types::{ChatResponse, StopReason, Usage};
+    use crate::llm::types::{ChatResponse, StopReason, ToolCall, Usage};
 
     // --- Mock LLM for consolidation tests ---
 
@@ -339,7 +385,12 @@ mod tests {
         mgr.consolidate(&mut session, &mock_llm, 8192).await.unwrap();
 
         // Session should have only the recent half
-        assert_eq!(session.message_count(), 5);
+        // Session should have roughly half the messages (exact count depends on
+        // clean split point finding a User message boundary)
+        assert!(session.message_count() >= 4 && session.message_count() <= 7,
+            "Expected 4-7 messages after consolidation, got {}", session.message_count());
+        // First remaining message should be a User message (clean split)
+        assert!(matches!(session.messages[0].role, Role::User));
         // MEMORY.md should contain the summary
         let memory = std::fs::read_to_string(dir.path().join("memory/MEMORY.md")).unwrap();
         assert!(memory.contains("User name is Jiekai"));
@@ -413,6 +464,84 @@ mod tests {
 
         mgr.consolidate(&mut session, &mock_llm, 8192).await.unwrap();
         assert!(!session.needs_consolidation);
+    }
+
+    #[tokio::test]
+    async fn test_consolidation_no_orphaned_tools() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("memory")).unwrap();
+        let mgr = MemoryManager::new(dir.path().to_path_buf());
+        let mock_llm = MockConsolidationLlm {
+            response_text: "- User asked about time".into(),
+        };
+
+        let mut session = Session::new("test");
+        // Simulate a conversation with tool calls
+        session.add_message(Role::User, "What time is it?");
+        session.messages.push(Message::assistant_tool_use(
+            Some("Let me check.".into()),
+            vec![ToolCall {
+                id: "call_1".into(),
+                name: "get_time".into(),
+                arguments: serde_json::json!({}),
+            }],
+        ));
+        session.messages.push(Message::tool_result("call_1", "3:42 PM"));
+        session.add_message(Role::Assistant, "It's 3:42 PM.");
+        // Add more messages to trigger consolidation
+        for i in 0..8 {
+            session.add_message(Role::User, &format!("Question {i}"));
+            session.add_message(Role::Assistant, &format!("Answer {i}"));
+        }
+
+        mgr.consolidate(&mut session, &mock_llm, 8192).await.unwrap();
+
+        // Verify no orphaned tool messages at the start
+        if !session.messages.is_empty() {
+            assert!(
+                !matches!(session.messages[0].role, Role::Tool),
+                "First message should not be an orphaned tool result"
+            );
+            // Verify the first message is a User message (clean split)
+            assert!(
+                matches!(session.messages[0].role, Role::User),
+                "First message after consolidation should be a User message"
+            );
+        }
+    }
+
+    #[test]
+    fn test_strip_orphaned_tool_messages() {
+        let mut messages = vec![
+            Message::tool_result("call_1", "some result"),
+            Message::tool_result("call_2", "another result"),
+            Message::user("Hello"),
+            Message::assistant("Hi!"),
+        ];
+        strip_orphaned_tool_messages(&mut messages);
+        assert_eq!(messages.len(), 2);
+        assert!(matches!(messages[0].role, Role::User));
+    }
+
+    #[test]
+    fn test_find_clean_split_point() {
+        let messages = vec![
+            Message::user("Q1"),                    // 0
+            Message::assistant("A1"),               // 1
+            Message::user("Q2"),                    // 2
+            Message::assistant_tool_use(None, vec![ToolCall {
+                id: "c1".into(), name: "t".into(), arguments: serde_json::json!({}),
+            }]),                                     // 3
+            Message::tool_result("c1", "result"),   // 4
+            Message::assistant("A2"),               // 5
+            Message::user("Q3"),                    // 6
+            Message::assistant("A3"),               // 7
+        ];
+
+        // If desired split is at index 4 (tool result), should back up to index 2 (user)
+        assert_eq!(find_clean_split_point(&messages, 4), 2);
+        // If desired split is at index 6 (user), stays at 6
+        assert_eq!(find_clean_split_point(&messages, 6), 6);
     }
 
     // --- Original tests ---
