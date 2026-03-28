@@ -78,7 +78,7 @@ impl ContextBuilder {
         self.skill_manager = Some(SkillManager::load(&skills_dir, &tool_names));
     }
 
-    pub fn build(
+    pub async fn build(
         &mut self,
         session: &Session,
         tool_schemas: &[ToolSchema],
@@ -90,7 +90,7 @@ impl ContextBuilder {
         };
 
         if needs_reload {
-            let system = self.build_system_prompt()?;
+            let system = self.build_system_prompt().await?;
             self.cached_system = Some(CachedSystem {
                 prompt: system,
                 loaded_at: Instant::now(),
@@ -118,16 +118,16 @@ impl ContextBuilder {
         self.cached_system = None;
     }
 
-    fn build_system_prompt(&self) -> Result<String> {
+    async fn build_system_prompt(&self) -> Result<String> {
         let mut parts = Vec::new();
 
         // 1. SOUL.md
-        let soul = self.read_budgeted("SOUL.md", self.budgets.soul_max);
+        let soul = self.read_budgeted("SOUL.md", self.budgets.soul_max).await;
         if soul.is_empty() {
             // Auto-create default SOUL.md
             let soul_path = self.data_dir.join("SOUL.md");
             if !soul_path.exists() {
-                std::fs::write(&soul_path, DEFAULT_SOUL).ok();
+                tokio::fs::write(&soul_path, DEFAULT_SOUL).await.ok();
             }
             parts.push(DEFAULT_SOUL.to_string());
         } else {
@@ -135,7 +135,7 @@ impl ContextBuilder {
         }
 
         // 2. USER.md
-        let user = self.read_budgeted("USER.md", self.budgets.user_max);
+        let user = self.read_budgeted("USER.md", self.budgets.user_max).await;
         if !user.is_empty() {
             parts.push(format!("## User Context\n\n{user}"));
         }
@@ -144,13 +144,13 @@ impl ContextBuilder {
         parts.push(self.device_context());
 
         // 4. MEMORY.md
-        let memory = self.read_budgeted("memory/MEMORY.md", self.budgets.memory_max);
+        let memory = self.read_budgeted("memory/MEMORY.md", self.budgets.memory_max).await;
         if !memory.is_empty() {
             parts.push(format!("## Long-term Memory\n\n{memory}"));
         }
 
         // 5. Recent daily notes (last 3)
-        let notes = self.load_recent_daily_notes(3);
+        let notes = self.load_recent_daily_notes(3).await;
         if !notes.is_empty() {
             let truncated = truncate_at_boundary(&notes, self.budgets.daily_notes_max);
             parts.push(format!("## Recent Notes\n\n{truncated}"));
@@ -181,9 +181,9 @@ impl ContextBuilder {
         )
     }
 
-    fn read_budgeted(&self, relative_path: &str, max_bytes: usize) -> String {
+    async fn read_budgeted(&self, relative_path: &str, max_bytes: usize) -> String {
         let path = self.data_dir.join(relative_path);
-        match std::fs::read_to_string(&path) {
+        match tokio::fs::read_to_string(&path).await {
             Ok(content) => {
                 if content.len() > max_bytes {
                     tracing::warn!(
@@ -199,46 +199,65 @@ impl ContextBuilder {
         }
     }
 
-    fn load_recent_daily_notes(&self, count: usize) -> String {
+    async fn load_recent_daily_notes(&self, count: usize) -> String {
         let notes_dir = self.data_dir.join("memory");
-        let mut entries: Vec<_> = std::fs::read_dir(&notes_dir)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .filter(|e| {
-                let name = e.file_name().to_string_lossy().to_string();
-                // Match YYYY-MM-DD.md pattern
-                name.len() == 13 && name.ends_with(".md") && name.chars().nth(4) == Some('-')
-            })
-            .collect();
+        let mut read_dir = match tokio::fs::read_dir(&notes_dir).await {
+            Ok(rd) => rd,
+            Err(_) => return String::new(),
+        };
+
+        let mut entries = Vec::new();
+        while let Ok(Some(entry)) = read_dir.next_entry().await {
+            let name = entry.file_name().to_string_lossy().to_string();
+            // Match YYYY-MM-DD.md pattern
+            if name.len() == 13 && name.ends_with(".md") && name.chars().nth(4) == Some('-') {
+                entries.push(entry);
+            }
+        }
 
         // Sort by name descending (most recent first)
         entries.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
         entries.truncate(count);
 
-        entries
-            .iter()
-            .filter_map(|e| std::fs::read_to_string(e.path()).ok())
-            .collect::<Vec<_>>()
-            .join("\n\n")
+        let mut notes = Vec::new();
+        for entry in &entries {
+            if let Ok(content) = tokio::fs::read_to_string(entry.path()).await {
+                notes.push(content);
+            }
+        }
+        notes.join("\n\n")
     }
 
 
 }
 
+/// Find the largest byte index <= `max` that lies on a UTF-8 character boundary.
+fn floor_char_boundary(s: &str, max: usize) -> usize {
+    if max >= s.len() {
+        return s.len();
+    }
+    let mut i = max;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
 /// Truncate a string at a paragraph boundary (double newline) near max_bytes.
+/// Safe for all UTF-8 content — never panics on multi-byte characters.
 fn truncate_at_boundary(text: &str, max_bytes: usize) -> String {
     if text.len() <= max_bytes {
         return text.to_string();
     }
-    // Find the last paragraph break before max_bytes
-    let search_region = &text[..max_bytes];
+    // Snap to a valid UTF-8 boundary before searching for paragraph breaks
+    let safe_end = floor_char_boundary(text, max_bytes);
+    let search_region = &text[..safe_end];
     if let Some(pos) = search_region.rfind("\n\n") {
         format!("{}...", &text[..pos])
     } else if let Some(pos) = search_region.rfind('\n') {
         format!("{}...", &text[..pos])
     } else {
-        format!("{}...", &text[..max_bytes])
+        format!("{}...", search_region)
     }
 }
 
@@ -261,7 +280,28 @@ mod tests {
     }
 
     #[test]
-    fn test_build_with_soul_only() {
+    fn test_truncate_multibyte_utf8() {
+        // 'é' is 2 bytes, '你' is 3 bytes — ensure no panic when budget lands mid-char
+        let text = "café 你好世界 résumé";
+        // This should not panic regardless of where the boundary falls
+        for max in 0..=text.len() + 5 {
+            let result = truncate_at_boundary(text, max);
+            assert!(result.len() <= text.len() + 3); // +3 for "..."
+        }
+    }
+
+    #[test]
+    fn test_floor_char_boundary() {
+        let s = "café"; // c(1) a(1) f(1) é(2) = 5 bytes
+        assert_eq!(floor_char_boundary(s, 5), 5); // exact end
+        assert_eq!(floor_char_boundary(s, 4), 3); // mid-é → snaps back to 'f' end
+        assert_eq!(floor_char_boundary(s, 3), 3); // on boundary
+        assert_eq!(floor_char_boundary(s, 0), 0); // zero
+        assert_eq!(floor_char_boundary(s, 100), 5); // beyond end
+    }
+
+    #[tokio::test]
+    async fn test_build_with_soul_only() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("SOUL.md"), "# Test Agent\nYou are a test.").unwrap();
         std::fs::create_dir_all(dir.path().join("memory")).unwrap();
@@ -269,27 +309,27 @@ mod tests {
 
         let mut builder = ContextBuilder::new(dir.path().to_path_buf(), 60);
         let session = Session::new("test");
-        let ctx = builder.build(&session, &[]).unwrap();
+        let ctx = builder.build(&session, &[]).await.unwrap();
         assert!(ctx.system.contains("Test Agent"));
         assert!(ctx.system.contains("Device Context"));
     }
 
-    #[test]
-    fn test_missing_soul_creates_default() {
+    #[tokio::test]
+    async fn test_missing_soul_creates_default() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("memory")).unwrap();
         std::fs::create_dir_all(dir.path().join("skills")).unwrap();
 
         let mut builder = ContextBuilder::new(dir.path().to_path_buf(), 60);
         let session = Session::new("test");
-        let ctx = builder.build(&session, &[]).unwrap();
+        let ctx = builder.build(&session, &[]).await.unwrap();
         assert!(ctx.system.contains("UniClaw"));
         // Verify default SOUL.md was created
         assert!(dir.path().join("SOUL.md").exists());
     }
 
-    #[test]
-    fn test_cache_reuse() {
+    #[tokio::test]
+    async fn test_cache_reuse() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("SOUL.md"), "# V1").unwrap();
         std::fs::create_dir_all(dir.path().join("memory")).unwrap();
@@ -298,10 +338,10 @@ mod tests {
         let mut builder = ContextBuilder::new(dir.path().to_path_buf(), 60);
         let session = Session::new("test");
 
-        let ctx1 = builder.build(&session, &[]).unwrap();
+        let ctx1 = builder.build(&session, &[]).await.unwrap();
         // Modify file — cache should still return V1
         std::fs::write(dir.path().join("SOUL.md"), "# V2").unwrap();
-        let ctx2 = builder.build(&session, &[]).unwrap();
+        let ctx2 = builder.build(&session, &[]).await.unwrap();
         assert_eq!(ctx1.system, ctx2.system); // cached
     }
 }

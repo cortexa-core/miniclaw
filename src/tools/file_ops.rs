@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use super::registry::{Tool, ToolContext, ToolResult};
 
 /// Validate that a requested path doesn't escape the data directory.
+/// Rejects path traversal (`..`), symlinks pointing outside the sandbox,
+/// and paths whose canonical form escapes the data directory.
 pub fn validate_path(data_dir: &Path, requested: &str) -> Result<PathBuf> {
     let requested = requested.trim_start_matches('/');
 
@@ -21,6 +23,24 @@ pub fn validate_path(data_dir: &Path, requested: &str) -> Result<PathBuf> {
 
     // For existing files, canonicalize and verify containment
     if joined.exists() {
+        // Reject symlinks that point outside the sandbox (defense-in-depth)
+        if joined.is_symlink() {
+            let target = std::fs::read_link(&joined)
+                .map_err(|e| anyhow!("Cannot read symlink: {e}"))?;
+            let resolved = if target.is_absolute() {
+                target
+            } else {
+                joined.parent().unwrap_or(&data_dir_canonical).join(&target)
+            };
+            if let Ok(canonical_target) = resolved.canonicalize() {
+                if !canonical_target.starts_with(&data_dir_canonical) {
+                    return Err(anyhow!("Symlink points outside data directory"));
+                }
+            } else {
+                return Err(anyhow!("Symlink target does not exist"));
+            }
+        }
+
         let canonical = joined.canonicalize()?;
         if !canonical.starts_with(&data_dir_canonical) {
             return Err(anyhow!("Path escapes data directory"));
@@ -81,7 +101,7 @@ impl Tool for ReadFileTool {
             Err(e) => return ToolResult::Error(format!("Invalid path: {e}")),
         };
 
-        match std::fs::read_to_string(&full_path) {
+        match tokio::fs::read_to_string(&full_path).await {
             Ok(content) => ToolResult::Success(content),
             Err(e) => ToolResult::Error(format!("Failed to read file: {e}")),
         }
@@ -134,12 +154,12 @@ impl Tool for WriteFileTool {
 
         // Create parent directories
         if let Some(parent) = full_path.parent() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
+            if let Err(e) = tokio::fs::create_dir_all(parent).await {
                 return ToolResult::Error(format!("Failed to create directories: {e}"));
             }
         }
 
-        match std::fs::write(&full_path, content) {
+        match tokio::fs::write(&full_path, content).await {
             Ok(_) => ToolResult::Success(format!("Written {} bytes to {path}", content.len())),
             Err(e) => ToolResult::Error(format!("Failed to write file: {e}")),
         }
@@ -182,15 +202,15 @@ impl Tool for ListDirTool {
             }
         };
 
-        let entries = match std::fs::read_dir(&dir_path) {
-            Ok(entries) => entries,
+        let mut read_dir = match tokio::fs::read_dir(&dir_path).await {
+            Ok(rd) => rd,
             Err(e) => return ToolResult::Error(format!("Failed to list directory: {e}")),
         };
 
         let mut lines = Vec::new();
-        for entry in entries.flatten() {
+        while let Ok(Some(entry)) = read_dir.next_entry().await {
             let name = entry.file_name().to_string_lossy().to_string();
-            let metadata = entry.metadata();
+            let metadata = entry.metadata().await;
             let (kind, size) = match metadata {
                 Ok(m) => {
                     if m.is_dir() {
@@ -248,6 +268,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let result = validate_path(dir.path(), "subdir/../../escape");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_path_symlink_escape() {
+        let dir = tempfile::tempdir().unwrap();
+        // Create a symlink inside data dir pointing to /tmp (outside sandbox)
+        let link_path = dir.path().join("evil_link");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("/tmp", &link_path).unwrap();
+            let result = validate_path(dir.path(), "evil_link");
+            assert!(result.is_err(), "Symlink pointing outside sandbox should be rejected");
+        }
     }
 
     #[tokio::test]

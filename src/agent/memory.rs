@@ -81,9 +81,9 @@ impl SessionStore {
         }
     }
 
-    pub fn get_or_load(&mut self, id: &str) -> &mut Session {
+    pub async fn get_or_load(&mut self, id: &str) -> &mut Session {
         if !self.sessions.contains_key(id) {
-            let session = self.load_from_disk(id).unwrap_or_else(|_| Session::new(id));
+            let session = self.load_from_disk(id).await.unwrap_or_else(|_| Session::new(id));
             self.sessions.insert(id.to_string(), session);
         }
         self.sessions
@@ -91,37 +91,53 @@ impl SessionStore {
             .expect("session was just inserted; this is a bug if it fails")
     }
 
-    pub fn persist(&self, id: &str) -> Result<()> {
+    pub async fn persist(&self, id: &str) -> Result<()> {
         if let Some(session) = self.sessions.get(id) {
             let sessions_dir = self.data_dir.join("sessions");
-            std::fs::create_dir_all(&sessions_dir)?;
+            tokio::fs::create_dir_all(&sessions_dir).await?;
             let path = sessions_dir.join(format!("{id}.jsonl"));
             let content: String = session
                 .messages
                 .iter()
-                .map(|m| serde_json::to_string(m).unwrap_or_default())
+                .filter_map(|m| {
+                    match serde_json::to_string(m) {
+                        Ok(json) => Some(json),
+                        Err(e) => {
+                            tracing::error!("Failed to serialize message in session {id}: {e}");
+                            None
+                        }
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
-            std::fs::write(&path, content)?;
+            tokio::fs::write(&path, content).await?;
             tracing::debug!("Persisted session {id} ({} messages)", session.messages.len());
         }
         Ok(())
     }
 
-    pub fn persist_all(&self) -> Result<()> {
+    pub async fn persist_all(&self) -> Result<()> {
         for id in self.sessions.keys() {
-            self.persist(id)?;
+            self.persist(id).await?;
         }
         Ok(())
     }
 
-    fn load_from_disk(&self, id: &str) -> Result<Session> {
+    async fn load_from_disk(&self, id: &str) -> Result<Session> {
         let path = self.data_dir.join(format!("sessions/{id}.jsonl"));
-        let content = std::fs::read_to_string(&path)?;
+        let content = tokio::fs::read_to_string(&path).await?;
         let messages: Vec<Message> = content
             .lines()
             .filter(|line| !line.trim().is_empty())
-            .filter_map(|line| serde_json::from_str(line).ok())
+            .filter_map(|line| {
+                match serde_json::from_str(line) {
+                    Ok(msg) => Some(msg),
+                    Err(e) => {
+                        tracing::warn!("Skipping malformed message in session {id}: {e}");
+                        None
+                    }
+                }
+            })
             .collect();
 
         Ok(Session {
@@ -146,34 +162,33 @@ impl MemoryManager {
     }
 
     #[allow(dead_code)] // used by future memory tools and consolidation
-    pub fn read_memory(&self) -> Result<String> {
+    pub async fn read_memory(&self) -> Result<String> {
         let path = self.data_dir.join("memory/MEMORY.md");
-        Ok(std::fs::read_to_string(&path).unwrap_or_default())
+        Ok(tokio::fs::read_to_string(&path).await.unwrap_or_default())
     }
 
     #[allow(dead_code)]
-    pub fn append_memory(&self, key: &str, value: &str) -> Result<()> {
+    pub async fn append_memory(&self, key: &str, value: &str) -> Result<()> {
         let path = self.data_dir.join("memory/MEMORY.md");
-        let mut content = std::fs::read_to_string(&path).unwrap_or_default();
+        let mut content = tokio::fs::read_to_string(&path).await.unwrap_or_default();
         let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M");
         content.push_str(&format!("\n- [{timestamp}] {key}: {value}"));
-        std::fs::write(&path, content)?;
+        tokio::fs::write(&path, content).await?;
         Ok(())
     }
 
     #[allow(dead_code)]
-    pub fn append_daily_note(&self, note: &str) -> Result<()> {
+    pub async fn append_daily_note(&self, note: &str) -> Result<()> {
         let date = chrono::Local::now().format("%Y-%m-%d");
         let path = self.data_dir.join(format!("memory/{date}.md"));
 
-        let mut content = if path.exists() {
-            std::fs::read_to_string(&path)?
-        } else {
-            format!("## {date}\n")
+        let mut content = match tokio::fs::read_to_string(&path).await {
+            Ok(c) => c,
+            Err(_) => format!("## {date}\n"),
         };
 
         content.push_str(&format!("\n- {note}"));
-        std::fs::write(&path, content)?;
+        tokio::fs::write(&path, content).await?;
         Ok(())
     }
 
@@ -231,13 +246,17 @@ impl MemoryManager {
         let context = Context::simple_query(&summary_prompt);
         let summary_response = llm.chat(&context).await;
 
+        // Only discard old messages if the summary was actually persisted to disk.
+        // This prevents data loss when the LLM fails or returns empty results.
+        let mut summary_saved = false;
+
         match summary_response {
             Ok(response) => {
                 if let Some(summary_text) = response.text {
                     if !summary_text.trim().is_empty() {
                         // Append summary to MEMORY.md
                         let memory_path = self.data_dir.join("memory/MEMORY.md");
-                        let mut memory = std::fs::read_to_string(&memory_path).unwrap_or_default();
+                        let mut memory = tokio::fs::read_to_string(&memory_path).await.unwrap_or_default();
                         let date = chrono::Local::now().format("%Y-%m-%d %H:%M");
                         memory.push_str(&format!("\n\n### Consolidated {date}\n\n{summary_text}"));
 
@@ -251,24 +270,30 @@ impl MemoryManager {
                             memory = self.reconsolidate_memory(&memory, llm, memory_max_bytes).await;
                         }
 
-                        std::fs::write(&memory_path, memory)?;
+                        tokio::fs::write(&memory_path, memory).await?;
                         tracing::info!("Consolidation summary written to MEMORY.md");
+                        summary_saved = true;
+                    } else {
+                        tracing::warn!("Consolidation returned empty summary. Keeping messages.");
                     }
+                } else {
+                    tracing::warn!("Consolidation returned no text. Keeping messages.");
                 }
             }
             Err(e) => {
-                // Consolidation failure is non-fatal — just log and continue
-                tracing::warn!("Consolidation LLM call failed: {e}. Skipping summary.");
+                tracing::warn!("Consolidation LLM call failed: {e}. Keeping messages.");
             }
         }
 
-        // Remove old messages. Find a clean split point that doesn't orphan
-        // tool results (which must follow their assistant tool_use message).
-        let clean_split = find_clean_split_point(&session.messages, split_point);
-        session.messages = session.messages[clean_split..].to_vec();
+        if summary_saved {
+            // Remove old messages. Find a clean split point that doesn't orphan
+            // tool results (which must follow their assistant tool_use message).
+            let clean_split = find_clean_split_point(&session.messages, split_point);
+            session.messages = session.messages[clean_split..].to_vec();
 
-        // Strip any remaining orphaned tool messages at the start
-        strip_orphaned_tool_messages(&mut session.messages);
+            // Strip any remaining orphaned tool messages at the start
+            strip_orphaned_tool_messages(&mut session.messages);
+        }
 
         session.needs_consolidation = false;
 
@@ -556,58 +581,58 @@ mod tests {
         assert_eq!(session.messages[1].content_text(), "Hi there!");
     }
 
-    #[test]
-    fn test_session_roundtrip_jsonl() {
+    #[tokio::test]
+    async fn test_session_roundtrip_jsonl() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("sessions")).unwrap();
         let mut store = SessionStore::new(dir.path().to_path_buf());
 
         // Create and populate session
         {
-            let session = store.get_or_load("abc");
+            let session = store.get_or_load("abc").await;
             session.add_message(Role::User, "Hello");
             session.add_message(Role::Assistant, "Hi!");
         }
-        store.persist("abc").unwrap();
+        store.persist("abc").await.unwrap();
 
         // Load from fresh store
         let mut store2 = SessionStore::new(dir.path().to_path_buf());
-        let session2 = store2.get_or_load("abc");
+        let session2 = store2.get_or_load("abc").await;
         assert_eq!(session2.message_count(), 2);
         assert_eq!(session2.messages[0].content_text(), "Hello");
     }
 
-    #[test]
-    fn test_session_store_creates_new() {
+    #[tokio::test]
+    async fn test_session_store_creates_new() {
         let dir = tempfile::tempdir().unwrap();
         let mut store = SessionStore::new(dir.path().to_path_buf());
-        let session = store.get_or_load("new-session");
+        let session = store.get_or_load("new-session").await;
         assert_eq!(session.id, "new-session");
         assert_eq!(session.message_count(), 0);
     }
 
-    #[test]
-    fn test_memory_manager_append_and_read() {
+    #[tokio::test]
+    async fn test_memory_manager_append_and_read() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("memory")).unwrap();
         let mgr = MemoryManager::new(dir.path().to_path_buf());
 
-        mgr.append_memory("name", "Jiekai").unwrap();
-        mgr.append_memory("color", "blue").unwrap();
+        mgr.append_memory("name", "Jiekai").await.unwrap();
+        mgr.append_memory("color", "blue").await.unwrap();
 
-        let memory = mgr.read_memory().unwrap();
+        let memory = mgr.read_memory().await.unwrap();
         assert!(memory.contains("name: Jiekai"));
         assert!(memory.contains("color: blue"));
     }
 
-    #[test]
-    fn test_daily_note() {
+    #[tokio::test]
+    async fn test_daily_note() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("memory")).unwrap();
         let mgr = MemoryManager::new(dir.path().to_path_buf());
 
-        mgr.append_daily_note("User prefers Celsius").unwrap();
-        mgr.append_daily_note("Created morning cron job").unwrap();
+        mgr.append_daily_note("User prefers Celsius").await.unwrap();
+        mgr.append_daily_note("Created morning cron job").await.unwrap();
 
         let date = chrono::Local::now().format("%Y-%m-%d");
         let path = dir.path().join(format!("memory/{date}.md"));

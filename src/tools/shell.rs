@@ -35,17 +35,28 @@ impl Tool for ShellExecTool {
             None => return ToolResult::Error("Missing required parameter: command".into()),
         };
 
-        // Reject shell metacharacters that allow command chaining/injection
-        const DANGEROUS_CHARS: &[char] = &[';', '&', '|', '`', '$', '(', ')', '{', '}', '<', '>'];
+        // Reject shell metacharacters and control characters that allow injection
+        const DANGEROUS_CHARS: &[char] = &[
+            ';', '&', '|', '`', '$', '(', ')', '{', '}', '<', '>',
+            '\n', '\r', '\0',
+        ];
         if command.chars().any(|c| DANGEROUS_CHARS.contains(&c)) {
             return ToolResult::Error(
-                "Command contains disallowed shell characters (;, &, |, `, $, etc.). \
+                "Command contains disallowed characters (shell metacharacters or control chars). \
                  Only simple commands are allowed."
                     .into(),
             );
         }
 
-        // Parse allowed commands from config
+        // Split command into program and arguments (no shell interpretation)
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        let program = match parts.first() {
+            Some(p) => *p,
+            None => return ToolResult::Error("Empty command".into()),
+        };
+        let args = &parts[1..];
+
+        // Check program against whitelist
         let allowed: HashSet<&str> = ctx
             .config
             .tools
@@ -54,9 +65,6 @@ impl Tool for ShellExecTool {
             .map(|s| s.as_str())
             .collect();
 
-        // Extract the program name (first word)
-        let program = command.split_whitespace().next().unwrap_or("");
-
         if !allowed.is_empty() && !allowed.contains(program) {
             return ToolResult::Error(format!(
                 "Command '{program}' is not in the allowed list. Allowed: {}",
@@ -64,12 +72,13 @@ impl Tool for ShellExecTool {
             ));
         }
 
-        let timeout = Duration::from_secs(ctx.config.tools.shell_timeout_secs);
+        let timeout_duration = Duration::from_secs(ctx.config.tools.shell_timeout_secs);
 
+        // Execute directly without shell interpretation — prevents all injection vectors
         let result = tokio::time::timeout(
-            timeout,
-            tokio::process::Command::new("sh")
-                .args(["-c", command])
+            timeout_duration,
+            tokio::process::Command::new(program)
+                .args(args)
                 .current_dir(&ctx.data_dir)
                 .output(),
         )
@@ -85,10 +94,14 @@ impl Tool for ShellExecTool {
                     if !stderr.is_empty() {
                         result.push_str(&format!("\nstderr: {stderr}"));
                     }
-                    // Truncate long output
+                    // Truncate long output (snap to UTF-8 char boundary)
                     if result.len() > 4096 {
-                        result.truncate(4096);
-                        result.push_str("\n... (output truncated at 4096 chars)");
+                        let mut end = 4096;
+                        while end > 0 && !result.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        result.truncate(end);
+                        result.push_str("\n... (output truncated)");
                     }
                     ToolResult::Success(result)
                 } else {
@@ -99,7 +112,7 @@ impl Tool for ShellExecTool {
                 }
             }
             Ok(Err(e)) => ToolResult::Error(format!("Failed to execute command: {e}")),
-            Err(_) => ToolResult::Error(format!("Command timed out after {}s", timeout.as_secs())),
+            Err(_) => ToolResult::Error(format!("Command timed out after {}s", timeout_duration.as_secs())),
         }
     }
 }
@@ -107,7 +120,6 @@ impl Tool for ShellExecTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use std::sync::Arc;
     use crate::config::Config;
 
@@ -151,5 +163,27 @@ shell_timeout_secs = 5
             .await;
         assert!(result.is_error());
         assert!(result.content().contains("not in the allowed list"));
+    }
+
+    #[tokio::test]
+    async fn test_shell_exec_rejects_newline_injection() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = test_ctx(dir.path());
+        let result = ShellExecTool
+            .execute(json!({"command": "echo hello\ncat /etc/passwd"}), &ctx)
+            .await;
+        assert!(result.is_error());
+        assert!(result.content().contains("disallowed characters"));
+    }
+
+    #[tokio::test]
+    async fn test_shell_exec_rejects_semicolon() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = test_ctx(dir.path());
+        let result = ShellExecTool
+            .execute(json!({"command": "echo hello; cat /etc/passwd"}), &ctx)
+            .await;
+        assert!(result.is_error());
+        assert!(result.content().contains("disallowed characters"));
     }
 }
