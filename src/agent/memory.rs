@@ -231,6 +231,10 @@ impl MemoryManager {
         let context = Context::simple_query(&summary_prompt);
         let summary_response = llm.chat(&context).await;
 
+        // Only discard old messages if the summary was actually persisted to disk.
+        // This prevents data loss when the LLM fails or returns empty results.
+        let mut summary_saved = false;
+
         match summary_response {
             Ok(response) => {
                 if let Some(summary_text) = response.text {
@@ -253,22 +257,28 @@ impl MemoryManager {
 
                         std::fs::write(&memory_path, memory)?;
                         tracing::info!("Consolidation summary written to MEMORY.md");
+                        summary_saved = true;
+                    } else {
+                        tracing::warn!("Consolidation returned empty summary. Keeping messages.");
                     }
+                } else {
+                    tracing::warn!("Consolidation returned no text. Keeping messages.");
                 }
             }
             Err(e) => {
-                // Consolidation failure is non-fatal — just log and continue
-                tracing::warn!("Consolidation LLM call failed: {e}. Skipping summary.");
+                tracing::warn!("Consolidation LLM call failed: {e}. Keeping messages.");
             }
         }
 
-        // Remove old messages. Find a clean split point that doesn't orphan
-        // tool results (which must follow their assistant tool_use message).
-        let clean_split = find_clean_split_point(&session.messages, split_point);
-        session.messages = session.messages[clean_split..].to_vec();
+        if summary_saved {
+            // Remove old messages. Find a clean split point that doesn't orphan
+            // tool results (which must follow their assistant tool_use message).
+            let clean_split = find_clean_split_point(&session.messages, split_point);
+            session.messages = session.messages[clean_split..].to_vec();
 
-        // Strip any remaining orphaned tool messages at the start
-        strip_orphaned_tool_messages(&mut session.messages);
+            // Strip any remaining orphaned tool messages at the start
+            strip_orphaned_tool_messages(&mut session.messages);
+        }
 
         session.needs_consolidation = false;
 

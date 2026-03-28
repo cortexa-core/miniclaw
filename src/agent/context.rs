@@ -226,19 +226,33 @@ impl ContextBuilder {
 
 }
 
+/// Find the largest byte index <= `max` that lies on a UTF-8 character boundary.
+fn floor_char_boundary(s: &str, max: usize) -> usize {
+    if max >= s.len() {
+        return s.len();
+    }
+    let mut i = max;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
 /// Truncate a string at a paragraph boundary (double newline) near max_bytes.
+/// Safe for all UTF-8 content — never panics on multi-byte characters.
 fn truncate_at_boundary(text: &str, max_bytes: usize) -> String {
     if text.len() <= max_bytes {
         return text.to_string();
     }
-    // Find the last paragraph break before max_bytes
-    let search_region = &text[..max_bytes];
+    // Snap to a valid UTF-8 boundary before searching for paragraph breaks
+    let safe_end = floor_char_boundary(text, max_bytes);
+    let search_region = &text[..safe_end];
     if let Some(pos) = search_region.rfind("\n\n") {
         format!("{}...", &text[..pos])
     } else if let Some(pos) = search_region.rfind('\n') {
         format!("{}...", &text[..pos])
     } else {
-        format!("{}...", &text[..max_bytes])
+        format!("{}...", search_region)
     }
 }
 
@@ -258,6 +272,27 @@ mod tests {
     fn test_truncate_short_text() {
         let text = "Short text.";
         assert_eq!(truncate_at_boundary(text, 100), "Short text.");
+    }
+
+    #[test]
+    fn test_truncate_multibyte_utf8() {
+        // 'é' is 2 bytes, '你' is 3 bytes — ensure no panic when budget lands mid-char
+        let text = "café 你好世界 résumé";
+        // This should not panic regardless of where the boundary falls
+        for max in 0..=text.len() + 5 {
+            let result = truncate_at_boundary(text, max);
+            assert!(result.len() <= text.len() + 3); // +3 for "..."
+        }
+    }
+
+    #[test]
+    fn test_floor_char_boundary() {
+        let s = "café"; // c(1) a(1) f(1) é(2) = 5 bytes
+        assert_eq!(floor_char_boundary(s, 5), 5); // exact end
+        assert_eq!(floor_char_boundary(s, 4), 3); // mid-é → snaps back to 'f' end
+        assert_eq!(floor_char_boundary(s, 3), 3); // on boundary
+        assert_eq!(floor_char_boundary(s, 0), 0); // zero
+        assert_eq!(floor_char_boundary(s, 100), 5); // beyond end
     }
 
     #[test]

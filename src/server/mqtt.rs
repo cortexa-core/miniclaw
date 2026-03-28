@@ -29,7 +29,8 @@ pub async fn mqtt_task(
     let broker = config.server.as_ref().map(|s| s.mqtt_broker.as_str()).unwrap_or("localhost");
     let port = config.server.as_ref().map(|s| s.mqtt_port).unwrap_or(1883);
 
-    let client_id = format!("uniclaw-{}", &device_id[..device_id.len().min(8)]);
+    let truncated_id: String = device_id.chars().take(8).collect();
+    let client_id = format!("uniclaw-{truncated_id}");
     let mut mqtt_options = MqttOptions::new(&client_id, broker, port);
     mqtt_options.set_keep_alive(Duration::from_secs(30));
 

@@ -54,6 +54,27 @@ impl Output {
     }
 }
 
+/// Validate a session ID for safe use in file paths.
+/// Rejects path traversal characters, path separators, and overly long IDs.
+fn validate_session_id(id: &str) -> Result<()> {
+    if id.is_empty() {
+        return Err(anyhow!("Session ID cannot be empty"));
+    }
+    if id.len() > 128 {
+        return Err(anyhow!("Session ID too long (max 128 characters)"));
+    }
+    // Allow only alphanumeric, hyphens, underscores, and dots (no path separators or ..)
+    if !id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.') {
+        return Err(anyhow!(
+            "Session ID contains invalid characters (only alphanumeric, hyphens, underscores, dots allowed)"
+        ));
+    }
+    if id.contains("..") {
+        return Err(anyhow!("Session ID cannot contain '..'"));
+    }
+    Ok(())
+}
+
 impl Agent {
     pub fn new(
         llm: Box<dyn LlmProvider>,
@@ -92,6 +113,9 @@ impl Agent {
 
     /// Process one input. Called only by agent_worker task (sole owner).
     pub async fn process(&mut self, input: &Input) -> Result<Output> {
+        // Validate session ID to prevent path traversal via crafted IDs
+        validate_session_id(&input.session_id)?;
+
         // Consolidation deferred from previous turn — runs before new input
         let needs_consolidation = {
             let session = self.session_store.get_or_load(&input.session_id);
