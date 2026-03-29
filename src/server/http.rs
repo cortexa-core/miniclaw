@@ -24,6 +24,7 @@ pub fn router(state: Arc<HttpState>) -> Router {
         .route("/api/chat", post(chat_handler))
         .route("/api/status", get(status_handler))
         .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024)) // 1 MB
+        .fallback(super::static_files::static_handler)
         .with_state(state)
 }
 

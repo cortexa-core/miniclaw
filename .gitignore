@@ -8,6 +8,7 @@ logs/
 data/sessions/
 data/memory/MEMORY.md
 dist/
+web/dist/
 CLAUDE.md
 DESIGN.md
 PLAN.md
