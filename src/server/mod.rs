@@ -1,3 +1,4 @@
+pub mod api_config;
 pub mod http;
 pub mod mqtt;
 pub mod cron;
