@@ -135,7 +135,14 @@ async fn create_agent(config: &Config, data_dir: &PathBuf) -> Result<Agent> {
         // Note: clients are kept alive by the Arc<McpClient> inside each McpTool
     }
 
-    Ok(Agent::new(primary, fallback, tool_registry, config, data_dir.clone()))
+    let mut agent = Agent::new(primary, fallback, tool_registry, config, data_dir.clone());
+
+    // Run session GC at startup — remove expired and excess session files
+    if let Err(e) = agent.cleanup_sessions().await {
+        tracing::warn!("Session cleanup failed: {e}");
+    }
+
+    Ok(agent)
 }
 
 /// Spawn the agent worker task. Returns the inbound sender.

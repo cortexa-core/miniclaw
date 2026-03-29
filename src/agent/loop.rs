@@ -113,6 +113,15 @@ impl Agent {
         }
     }
 
+    /// Run session garbage collection using config limits.
+    /// Should be called once at startup before processing requests.
+    pub async fn cleanup_sessions(&mut self) -> Result<usize> {
+        self.session_store.cleanup_sessions(
+            self.full_config.agent.session_max_age_days,
+            self.full_config.agent.session_max_count,
+        ).await
+    }
+
     /// Process one input with a timeout guard.
     /// Called only by agent_worker task (sole owner).
     pub async fn process(&mut self, input: &Input) -> Result<Output> {

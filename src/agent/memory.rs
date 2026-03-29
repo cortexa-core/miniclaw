@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::SystemTime;
 
 use crate::llm::types::{ChatResponse, Context, Message, MessageContent, Role};
 use crate::llm::LlmProvider;
@@ -121,6 +122,81 @@ impl SessionStore {
             self.persist(id).await?;
         }
         Ok(())
+    }
+
+    /// Remove stale session files from disk.
+    /// Deletes sessions older than `max_age_days` and trims to `max_count`
+    /// (keeping the most recently modified). Also evicts removed sessions
+    /// from the in-memory cache.
+    pub async fn cleanup_sessions(&mut self, max_age_days: u64, max_count: usize) -> Result<usize> {
+        let sessions_dir = self.data_dir.join("sessions");
+        let mut read_dir = match tokio::fs::read_dir(&sessions_dir).await {
+            Ok(rd) => rd,
+            Err(_) => return Ok(0), // no sessions dir yet
+        };
+
+        // Collect all .jsonl files with their modification times
+        let mut entries: Vec<(String, PathBuf, SystemTime)> = Vec::new();
+        while let Ok(Some(entry)) = read_dir.next_entry().await {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !name.ends_with(".jsonl") {
+                continue;
+            }
+            let path = entry.path();
+            let mtime = match entry.metadata().await {
+                Ok(m) => m.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+                Err(_) => continue,
+            };
+            let session_id = name.trim_end_matches(".jsonl").to_string();
+            entries.push((session_id, path, mtime));
+        }
+
+        if entries.is_empty() {
+            return Ok(0);
+        }
+
+        let now = SystemTime::now();
+        let max_age = std::time::Duration::from_secs(max_age_days * 24 * 3600);
+        let mut removed = 0;
+
+        // Phase 1: Remove sessions older than max_age_days
+        let mut kept = Vec::new();
+        for (session_id, path, mtime) in entries {
+            let age = now.duration_since(mtime).unwrap_or_default();
+            if age > max_age {
+                if let Err(e) = tokio::fs::remove_file(&path).await {
+                    tracing::warn!("Failed to remove expired session {session_id}: {e}");
+                } else {
+                    tracing::info!("Removed expired session {session_id} (age: {}d)", age.as_secs() / 86400);
+                    self.sessions.remove(&session_id);
+                    removed += 1;
+                }
+            } else {
+                kept.push((session_id, path, mtime));
+            }
+        }
+
+        // Phase 2: If still over max_count, remove oldest by mtime
+        if kept.len() > max_count {
+            // Sort by mtime ascending (oldest first)
+            kept.sort_by_key(|(_, _, mtime)| *mtime);
+            let to_remove = kept.len() - max_count;
+            for (session_id, path, _) in kept.drain(..to_remove) {
+                if let Err(e) = tokio::fs::remove_file(&path).await {
+                    tracing::warn!("Failed to remove excess session {session_id}: {e}");
+                } else {
+                    tracing::info!("Removed excess session {session_id} (over max count {max_count})");
+                    self.sessions.remove(&session_id);
+                    removed += 1;
+                }
+            }
+        }
+
+        if removed > 0 {
+            tracing::info!("Session cleanup: removed {removed} session(s), {} remaining", kept.len());
+        }
+
+        Ok(removed)
     }
 
     async fn load_from_disk(&self, id: &str) -> Result<Session> {
@@ -639,5 +715,99 @@ mod tests {
         let content = std::fs::read_to_string(path).unwrap();
         assert!(content.contains("Celsius"));
         assert!(content.contains("morning cron"));
+    }
+
+    // --- Session GC tests ---
+
+    #[tokio::test]
+    async fn test_cleanup_removes_excess_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions_dir = dir.path().join("sessions");
+        std::fs::create_dir_all(&sessions_dir).unwrap();
+
+        // Create 5 session files with staggered mtimes (all recent, within 1 day)
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+        for i in 0..5 {
+            let path = sessions_dir.join(format!("session-{i}.jsonl"));
+            std::fs::write(&path, format!("{{\"role\":\"user\",\"content\":{{\"type\":\"text\",\"text\":\"msg {i}\"}}}}")).unwrap();
+            // Stagger mtimes: session-0 is oldest, session-4 is newest
+            let mtime = filetime::FileTime::from_unix_time(now_secs - 3600 + i as i64 * 100, 0);
+            filetime::set_file_mtime(&path, mtime).unwrap();
+        }
+
+        let mut store = SessionStore::new(dir.path().to_path_buf());
+        // Also load one into memory to verify eviction
+        store.get_or_load("session-0").await;
+        assert!(store.sessions.contains_key("session-0"));
+
+        // Keep max 3 sessions — should remove the 2 oldest (session-0, session-1)
+        let removed = store.cleanup_sessions(365, 3).await.unwrap();
+        assert_eq!(removed, 2);
+
+        // Verify files
+        assert!(!sessions_dir.join("session-0.jsonl").exists());
+        assert!(!sessions_dir.join("session-1.jsonl").exists());
+        assert!(sessions_dir.join("session-2.jsonl").exists());
+        assert!(sessions_dir.join("session-3.jsonl").exists());
+        assert!(sessions_dir.join("session-4.jsonl").exists());
+
+        // Verify in-memory eviction
+        assert!(!store.sessions.contains_key("session-0"));
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_removes_expired_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions_dir = dir.path().join("sessions");
+        std::fs::create_dir_all(&sessions_dir).unwrap();
+
+        // Create 2 "old" sessions (mtime 60 days ago) and 1 "new" session (now)
+        let old_time = filetime::FileTime::from_unix_time(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap()
+                .as_secs() as i64 - 60 * 86400,
+            0,
+        );
+        for name in &["old-1", "old-2"] {
+            let path = sessions_dir.join(format!("{name}.jsonl"));
+            std::fs::write(&path, "{}").unwrap();
+            filetime::set_file_mtime(&path, old_time).unwrap();
+        }
+        std::fs::write(sessions_dir.join("new-1.jsonl"), "{}").unwrap();
+
+        let mut store = SessionStore::new(dir.path().to_path_buf());
+        // max_age_days=30, max_count=100 — should remove the 2 old ones
+        let removed = store.cleanup_sessions(30, 100).await.unwrap();
+        assert_eq!(removed, 2);
+        assert!(!sessions_dir.join("old-1.jsonl").exists());
+        assert!(!sessions_dir.join("old-2.jsonl").exists());
+        assert!(sessions_dir.join("new-1.jsonl").exists());
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_no_sessions_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        // No sessions/ directory at all — should not error
+        let mut store = SessionStore::new(dir.path().to_path_buf());
+        let removed = store.cleanup_sessions(30, 100).await.unwrap();
+        assert_eq!(removed, 0);
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_under_limits_no_removal() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions_dir = dir.path().join("sessions");
+        std::fs::create_dir_all(&sessions_dir).unwrap();
+
+        // Create 2 recent sessions — under max_count=100, not expired
+        std::fs::write(sessions_dir.join("a.jsonl"), "{}").unwrap();
+        std::fs::write(sessions_dir.join("b.jsonl"), "{}").unwrap();
+
+        let mut store = SessionStore::new(dir.path().to_path_buf());
+        let removed = store.cleanup_sessions(30, 100).await.unwrap();
+        assert_eq!(removed, 0);
+        assert!(sessions_dir.join("a.jsonl").exists());
+        assert!(sessions_dir.join("b.jsonl").exists());
     }
 }
