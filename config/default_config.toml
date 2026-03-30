@@ -49,3 +49,10 @@ http_fetch_timeout_secs = 15
 
 [logging]
 level = "info"
+
+# Messaging channels
+# [channels.telegram]
+# enabled = true
+# bot_token_env = "TELEGRAM_BOT_TOKEN"
+# allowed_users = []
+# respond_in_groups = "mention"

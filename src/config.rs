@@ -15,6 +15,8 @@ pub struct Config {
     #[serde(default)]
     pub mcp_servers: Vec<crate::mcp::client::McpServerConfig>,
     #[serde(default)]
+    pub channels: ChannelsConfig,
+    #[serde(default)]
     pub tools: ToolsConfig,
     #[serde(default)]
     #[allow(dead_code)] // used in future phases for file logging
@@ -113,6 +115,24 @@ pub struct LoggingConfig {
     pub file: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, serde::Serialize, Default)]
+pub struct ChannelsConfig {
+    #[serde(default)]
+    pub telegram: Option<TelegramConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+pub struct TelegramConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub bot_token_env: String,
+    #[serde(default)]
+    pub allowed_users: Vec<i64>,
+    #[serde(default = "default_respond_in_groups")]
+    pub respond_in_groups: String,
+}
+
 impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
@@ -165,6 +185,7 @@ fn default_mqtt_port() -> u16 { 1883 }
 fn default_device_id() -> String { "uniclaw-01".to_string() }
 fn default_cron_interval() -> u64 { 60 }
 fn default_heartbeat_interval() -> u64 { 1800 }
+fn default_respond_in_groups() -> String { "mention".to_string() }
 
 #[cfg(test)]
 mod tests {
