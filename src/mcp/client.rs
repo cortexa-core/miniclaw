@@ -51,7 +51,7 @@ impl McpClient {
             "http" => {
                 let url = config.url.as_ref()
                     .ok_or_else(|| anyhow!("MCP server '{}': http transport requires 'url'", config.name))?;
-                Transport::Http(super::transport::HttpTransport::new(url))
+                Transport::Http(super::transport::HttpTransport::new(url)?)
             }
             other => {
                 return Err(anyhow!("MCP server '{}': unsupported transport '{other}'", config.name));

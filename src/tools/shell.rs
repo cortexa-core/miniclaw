@@ -50,15 +50,11 @@ impl Tool for ShellExecTool {
             );
         }
 
-        // Split command into program and arguments (no shell interpretation)
-        let parts: Vec<&str> = command.split_whitespace().collect();
-        let program = match parts.first() {
-            Some(p) => *p,
-            None => return ToolResult::Error("Empty command".into()),
-        };
-        let args = &parts[1..];
+        // Split on pipes to extract all programs for whitelist checking
+        let segments: Vec<&str> = command.split('|').collect();
+        let has_pipe = segments.len() > 1;
 
-        // Check program against whitelist
+        // Check each pipeline segment's program against whitelist
         let allowed: HashSet<&str> = ctx
             .config
             .tools
@@ -67,24 +63,47 @@ impl Tool for ShellExecTool {
             .map(|s| s.as_str())
             .collect();
 
-        if !allowed.is_empty() && !allowed.contains(program) {
-            return ToolResult::Error(format!(
-                "Command '{program}' is not in the allowed list. Allowed: {}",
-                ctx.config.tools.shell_allowed_commands.join(", ")
-            ));
+        for segment in &segments {
+            let parts: Vec<&str> = segment.trim().split_whitespace().collect();
+            let program = match parts.first() {
+                Some(p) => *p,
+                None => return ToolResult::Error("Empty command segment in pipeline".into()),
+            };
+
+            if !allowed.is_empty() && !allowed.contains(program) {
+                return ToolResult::Error(format!(
+                    "Command '{program}' is not in the allowed list. Allowed: {}",
+                    ctx.config.tools.shell_allowed_commands.join(", ")
+                ));
+            }
         }
 
         let timeout_duration = Duration::from_secs(ctx.config.tools.shell_timeout_secs);
 
-        // Execute directly without shell interpretation — prevents all injection vectors
-        let result = tokio::time::timeout(
-            timeout_duration,
-            tokio::process::Command::new(program)
-                .args(args)
-                .current_dir(&ctx.data_dir)
-                .output(),
-        )
-        .await;
+        // Use sh -c when pipes are present so the shell handles the pipeline.
+        // For simple commands, execute directly to avoid shell interpretation.
+        let result = if has_pipe {
+            tokio::time::timeout(
+                timeout_duration,
+                tokio::process::Command::new("sh")
+                    .args(["-c", command])
+                    .current_dir(&ctx.data_dir)
+                    .output(),
+            )
+            .await
+        } else {
+            let parts: Vec<&str> = command.split_whitespace().collect();
+            let program = parts[0]; // already validated non-empty above
+            let args = &parts[1..];
+            tokio::time::timeout(
+                timeout_duration,
+                tokio::process::Command::new(program)
+                    .args(args)
+                    .current_dir(&ctx.data_dir)
+                    .output(),
+            )
+            .await
+        };
 
         match result {
             Ok(Ok(output)) => {

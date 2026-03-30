@@ -5,6 +5,7 @@ mod llm;
 mod mcp;
 mod server;
 mod tools;
+mod utils;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -376,14 +377,6 @@ async fn send_and_wait(
 }
 
 fn atty_check() -> bool {
-    use std::os::unix::io::AsRawFd;
-    unsafe { libc_isatty(io::stdin().as_raw_fd()) != 0 }
-}
-
-extern "C" {
-    fn isatty(fd: i32) -> i32;
-}
-
-unsafe fn libc_isatty(fd: i32) -> i32 {
-    unsafe { isatty(fd) }
+    use std::io::IsTerminal;
+    io::stdin().is_terminal()
 }
