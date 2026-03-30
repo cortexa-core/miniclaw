@@ -1,23 +1,25 @@
 <script lang="ts">
   import { streamChat } from '../lib/stream';
   import { marked } from 'marked';
+  import {
+    getMessages, addMessage, appendMessageContent,
+    getSessionId, setSessionId, type ChatMessage,
+  } from '../lib/chat-store';
   import ToolCall from '../components/ToolCall.svelte';
   import { icons } from '../lib/icons';
 
-  interface Message {
-    role: 'user' | 'assistant';
-    content: string;
-    timestamp: Date;
-    tools?: Array<{ name: string; status: string; durationMs?: number }>;
-    totalMs?: number;
-  }
-
-  let messages = $state<Message[]>([]);
+  // Reactive local copies that read from the persistent store
+  let messages = $state<ChatMessage[]>(getMessages());
   let inputText = $state('');
   let isThinking = $state(false);
-  let sessionId = $state(localStorage.getItem('uniclaw-session') || 'web');
+  let sessionId = $state(getSessionId());
   let messagesEl: HTMLElement;
   let autoScroll = $state(true);
+
+  // Sync messages from store on mount (in case store was updated elsewhere)
+  $effect(() => {
+    messages = getMessages();
+  });
 
   function scrollToBottom() {
     if (autoScroll && messagesEl) {
@@ -41,24 +43,28 @@
     isThinking = true;
     autoScroll = true;
 
-    messages.push({ role: 'user', content: text, timestamp: new Date() });
+    addMessage({ role: 'user', content: text, timestamp: new Date() });
+    const idx = addMessage({ role: 'assistant', content: '', timestamp: new Date() });
 
-    const idx = messages.length;
-    messages.push({ role: 'assistant', content: '', timestamp: new Date() });
+    // Re-read from store to trigger reactivity
+    messages = getMessages();
 
     await streamChat(text, sessionId, {
       onStatus: () => {},
       onTextDelta: (chunk) => {
-        messages[idx].content += chunk;
+        appendMessageContent(idx, chunk);
+        messages = getMessages();
         scrollToBottom();
       },
       onUsage: () => {},
       onDone: () => {
         isThinking = false;
+        messages = getMessages();
         scrollToBottom();
       },
       onError: (error) => {
-        messages[idx].content = `Error: ${error}`;
+        appendMessageContent(idx, `Error: ${error}`);
+        messages = getMessages();
         isThinking = false;
       },
     });
@@ -79,9 +85,10 @@
     return marked.parse(text, { breaks: true }) as string;
   }
 
-  $effect(() => {
-    localStorage.setItem('uniclaw-session', sessionId);
-  });
+  function onSessionChange(newId: string) {
+    sessionId = newId;
+    setSessionId(newId);
+  }
 </script>
 
 <div class="chat-page">
