@@ -1,4 +1,5 @@
 mod agent;
+mod channels;
 mod config;
 mod llm;
 mod mcp;
@@ -323,6 +324,9 @@ async fn run_serve(config_path: &PathBuf, data_dir: &PathBuf) -> Result<()> {
             server::heartbeat::heartbeat_task(hb_dir, hb_tx, hb_interval).await;
         }));
     }
+
+    // Messaging channels (Telegram, Discord, etc.)
+    channels::spawn_channels(&config, inbound_tx.clone(), &mut tasks);
 
     if tasks.is_empty() {
         tracing::warn!("No server tasks enabled. Add [server] section to config.");

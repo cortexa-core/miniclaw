@@ -137,6 +137,26 @@ When asked about garden or plants:
 
 All gated skills are injected into the system prompt. The LLM decides which are relevant. Ships with 3 built-in skills (memory management, file operations, system monitoring).
 
+### Messaging Channels
+
+Chat with UniClaw through messaging platforms. Currently supported: **Telegram**.
+
+**Telegram setup:**
+1. Message [@BotFather](https://t.me/botfather) on Telegram, send `/newbot`, get your bot token
+2. Set the token: `export TELEGRAM_BOT_TOKEN="your-token"`
+3. Add to config:
+   ```toml
+   [channels.telegram]
+   enabled = true
+   bot_token_env = "TELEGRAM_BOT_TOKEN"
+   ```
+4. Start: `uniclaw serve`
+5. Message your bot on Telegram
+
+**Options:**
+- `allowed_users = [123456]` — restrict to specific Telegram user IDs (empty = allow all)
+- `respond_in_groups = "mention"` — in groups: `"mention"` (only when @mentioned), `"always"`, or `"never"`
+
 ### Security
 - **Path sandboxing**: file tools validate full ancestor chain, can't escape `data/` directory
 - **Shell injection prevention**: blocks metacharacters (`;`, `&`, `|`, `` ` ``, `$`)
