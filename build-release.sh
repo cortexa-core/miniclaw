@@ -33,7 +33,7 @@ TARGETS=(
 
 for TARGET in "${TARGETS[@]}"; do
     echo "Building for ${TARGET}..."
-    cargo zigbuild --target "$TARGET" --release 2>&1 | tail -1
+    cargo zigbuild --target "$TARGET" --release --features telegram 2>&1 | tail -1
 
     BINARY="target/${TARGET}/release/uniclaw"
     if [ ! -f "$BINARY" ]; then
