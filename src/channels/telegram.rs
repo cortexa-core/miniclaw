@@ -174,13 +174,19 @@ fn chunk_message(text: &str, max_len: usize) -> Vec<String> {
             break;
         }
 
-        let search = &remaining[..max_len];
+        // Snap to UTF-8 char boundary
+        let mut end = max_len;
+        while end > 0 && !remaining.is_char_boundary(end) {
+            end -= 1;
+        }
+
+        let search = &remaining[..end];
         let split_at = search.rfind("\n\n")
             .or_else(|| search.rfind('\n'))
             .or_else(|| search.rfind(' '))
-            .unwrap_or(max_len);
+            .unwrap_or(end);
 
-        let split_at = if split_at == 0 { max_len } else { split_at };
+        let split_at = if split_at == 0 { end } else { split_at };
 
         chunks.push(remaining[..split_at].to_string());
         remaining = remaining[split_at..].trim_start();
@@ -206,6 +212,17 @@ mod tests {
         let chunks = chunk_message(&text, 4096);
         assert_eq!(chunks.len(), 2);
         assert!(chunks[0].len() <= 4096);
+    }
+
+    #[test]
+    fn test_chunk_multibyte_utf8() {
+        let text = "你好世界".repeat(2000); // Chinese chars, 3 bytes each
+        let chunks = chunk_message(&text, 4096);
+        for chunk in &chunks {
+            assert!(chunk.len() <= 4096);
+            // Verify each chunk is valid UTF-8 (it will be if we don't panic)
+            assert!(std::str::from_utf8(chunk.as_bytes()).is_ok());
+        }
     }
 
     #[test]

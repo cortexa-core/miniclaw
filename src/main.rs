@@ -5,6 +5,7 @@ mod llm;
 mod mcp;
 mod server;
 mod tools;
+mod utils;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -264,6 +265,17 @@ async fn run_serve(config_path: &PathBuf, data_dir: &PathBuf) -> Result<()> {
 
     // HTTP server
     if config.server.as_ref().map(|s| s.http_enabled).unwrap_or(true) {
+        let api_token = config.server.as_ref()
+            .and_then(|s| {
+                if s.api_token_env.is_empty() { None }
+                else { std::env::var(&s.api_token_env).ok() }
+            })
+            .unwrap_or_default();
+
+        if api_token.is_empty() {
+            tracing::warn!("HTTP API has no authentication configured. Set [server] api_token_env to secure it.");
+        }
+
         let http_state = Arc::new(server::http::HttpState {
             inbound_tx: inbound_tx.clone(),
             version: env!("CARGO_PKG_VERSION").into(),
@@ -271,6 +283,7 @@ async fn run_serve(config_path: &PathBuf, data_dir: &PathBuf) -> Result<()> {
             start_time: std::time::Instant::now(),
             config_path: config_path.clone(),
             data_dir: data_dir.clone(),
+            api_token,
         });
 
         let port = config.server.as_ref().map(|s| s.http_port).unwrap_or(3000);
@@ -364,14 +377,6 @@ async fn send_and_wait(
 }
 
 fn atty_check() -> bool {
-    use std::os::unix::io::AsRawFd;
-    unsafe { libc_isatty(io::stdin().as_raw_fd()) != 0 }
-}
-
-extern "C" {
-    fn isatty(fd: i32) -> i32;
-}
-
-unsafe fn libc_isatty(fd: i32) -> i32 {
-    unsafe { isatty(fd) }
+    use std::io::IsTerminal;
+    io::stdin().is_terminal()
 }

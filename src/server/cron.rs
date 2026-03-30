@@ -6,6 +6,7 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::agent::{Input, Output};
+use crate::utils::floor_char_boundary;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CronJob {
@@ -62,18 +63,6 @@ pub async fn save_cron_jobs(data_dir: &PathBuf, jobs: &[CronJob]) -> Result<()> 
     let content = serde_json::to_string_pretty(jobs)?;
     tokio::fs::write(&path, content).await?;
     Ok(())
-}
-
-/// Find the largest byte index <= `max` that lies on a UTF-8 character boundary.
-fn floor_char_boundary(s: &str, max: usize) -> usize {
-    if max >= s.len() {
-        return s.len();
-    }
-    let mut i = max;
-    while i > 0 && !s.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
 }
 
 pub async fn cron_task(

@@ -3,18 +3,7 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::agent::{Input, Output};
-
-/// Find the largest byte index <= `max` that lies on a UTF-8 character boundary.
-fn floor_char_boundary(s: &str, max: usize) -> usize {
-    if max >= s.len() {
-        return s.len();
-    }
-    let mut i = max;
-    while i > 0 && !s.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
-}
+use crate::utils::floor_char_boundary;
 
 pub async fn heartbeat_task(
     data_dir: PathBuf,

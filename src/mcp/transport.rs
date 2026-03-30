@@ -161,14 +161,15 @@ pub struct HttpTransport {
 }
 
 impl HttpTransport {
-    pub fn new(url: &str) -> Self {
-        Self {
+    pub fn new(url: &str) -> Result<Self> {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|e| anyhow!("Failed to create HTTP client: {e}"))?;
+        Ok(Self {
             url: url.trim_end_matches('/').to_string(),
-            client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
-                .build()
-                .expect("Failed to create HTTP client"),
-        }
+            client,
+        })
     }
 
     async fn request(&self, method: &str, params: Option<Value>) -> Result<Value> {
