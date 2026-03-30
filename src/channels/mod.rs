@@ -9,6 +9,7 @@ use crate::config::Config;
 pub type AgentSender = mpsc::Sender<(Input, oneshot::Sender<Output>)>;
 
 /// Every messaging channel implements this trait.
+#[allow(dead_code)]
 #[async_trait]
 pub trait Channel: Send + Sync {
     /// Unique channel name (e.g., "telegram", "discord")
