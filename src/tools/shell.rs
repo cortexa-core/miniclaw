@@ -35,15 +35,17 @@ impl Tool for ShellExecTool {
             None => return ToolResult::Error("Missing required parameter: command".into()),
         };
 
-        // Reject shell metacharacters and control characters that allow injection
+        // Reject shell metacharacters that allow command injection.
+        // Pipes (|) are allowed — they're useful for data flow (sort, head, grep).
+        // Redirects (>, <) are blocked to prevent file overwrites.
         const DANGEROUS_CHARS: &[char] = &[
-            ';', '&', '|', '`', '$', '(', ')', '{', '}', '<', '>',
+            ';', '&', '`', '$', '(', ')', '{', '}', '<', '>',
             '\n', '\r', '\0',
         ];
         if command.chars().any(|c| DANGEROUS_CHARS.contains(&c)) {
             return ToolResult::Error(
-                "Command contains disallowed characters (shell metacharacters or control chars). \
-                 Only simple commands are allowed."
+                "Command contains disallowed characters (;, &, `, $, etc.). \
+                 Pipes (|) are allowed. Redirects (<, >) are not."
                     .into(),
             );
         }
