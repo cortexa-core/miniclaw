@@ -58,6 +58,7 @@ filetime = "0.2"
 
 [features]
 default = []
+telegram = []
 
 [profile.release]
 lto = true

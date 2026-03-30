@@ -1,4 +1,6 @@
 mod agent;
+#[allow(dead_code)]
+mod channels;
 mod config;
 mod llm;
 mod mcp;
