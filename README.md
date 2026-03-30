@@ -1,10 +1,8 @@
 # UniClaw
 
-A privacy-first AI agent that runs on a Raspberry Pi.
+A privacy-first AI agent for resource-constrained edge devices.
 
-**3.5MB binary. ~5MB RAM. 13 tools. Full ReAct agent loop. Web UI included.**
-
-UniClaw is a lightweight, self-hosted AI agent for edge devices. The agent loop runs locally — the cloud LLM is just an API it calls when it needs to think. Tools, memory, skills, and state all stay on your device.
+UniClaw is a lightweight, self-hosted AI agent designed for Raspberry Pi, cheap ARM boards, and beyond. The agent loop runs locally — the cloud LLM is just an API it calls when it needs to think. Tools, memory, skills, and state all stay on your device.
 
 ```
 $ ./uniclaw chat --message "What time is it?"
@@ -36,7 +34,7 @@ UniClaw is not a lighter version of OpenClaw — it's built for a different use 
 - **Local agent, cloud brain** — the agent loop, tools, memory, and state run on your device. Only LLM inference goes to the cloud.
 - **Tiny footprint** — 3.5MB binary, ~5MB RAM. Runs on a $35 Raspberry Pi with room to spare.
 - **Privacy by design** — your data stays on your device. API keys never enter the LLM context.
-- **Built for edge** — works behind NAT, survives reboots, handles offline gracefully.
+- **Built for edge** — works behind NAT, no public URL needed, runs as a system service.
 
 ## Quick Start
 
