@@ -12,18 +12,25 @@ use tokio::sync::{mpsc, oneshot};
 use crate::agent::{Input, Output};
 
 /// Shared state for HTTP handlers
+#[allow(dead_code)] // data_dir used in future phases
 pub struct HttpState {
     pub inbound_tx: mpsc::Sender<(Input, oneshot::Sender<Output>)>,
     pub version: String,
     pub model: String,
     pub start_time: std::time::Instant,
+    pub config_path: std::path::PathBuf,
+    pub data_dir: std::path::PathBuf,
 }
 
 pub fn router(state: Arc<HttpState>) -> Router {
     Router::new()
         .route("/api/chat", post(chat_handler))
         .route("/api/status", get(status_handler))
+        .route("/api/config", get(super::api_config::get_config).post(super::api_config::post_config))
+        .route("/api/skills", get(super::api_skills::get_skills))
+        .route("/api/chat/stream", post(super::api_stream::stream_chat))
         .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024)) // 1 MB
+        .fallback(super::static_files::static_handler)
         .with_state(state)
 }
 

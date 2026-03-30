@@ -8,7 +8,7 @@ use super::protocol::{self, McpToolDef};
 use super::transport::Transport;
 
 /// Configuration for a single MCP server
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct McpServerConfig {
     pub name: String,
     #[serde(default = "default_transport")]

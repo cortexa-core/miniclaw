@@ -268,6 +268,8 @@ async fn run_serve(config_path: &PathBuf, data_dir: &PathBuf) -> Result<()> {
             version: env!("CARGO_PKG_VERSION").into(),
             model: config.llm.model.clone(),
             start_time: std::time::Instant::now(),
+            config_path: config_path.clone(),
+            data_dir: data_dir.clone(),
         });
 
         let port = config.server.as_ref().map(|s| s.http_port).unwrap_or(3000);

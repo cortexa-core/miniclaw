@@ -32,6 +32,7 @@ clap = { version = "4", features = ["derive"] }
 
 # Async utilities
 async-trait = "0.1"
+async-stream = "0.3"
 tokio-stream = "0.1"
 
 # Error handling
@@ -48,6 +49,8 @@ cron = "0.15"
 # Misc
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
+rust-embed = "8"
+mime_guess = "2"
 
 [dev-dependencies]
 tempfile = "3"

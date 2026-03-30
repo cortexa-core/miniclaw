@@ -42,7 +42,7 @@ interval_secs = 1800
 
 [tools]
 shell_enabled = true
-shell_allowed_commands = ["ls", "cat", "date", "df", "free", "uptime", "ping", "wc"]
+shell_allowed_commands = ["ls", "cat", "date", "df", "free", "uptime", "ping", "wc", "du", "find", "sort", "head", "tail", "grep", "whoami", "hostname", "uname", "ifconfig", "curl"]
 shell_timeout_secs = 10
 http_fetch_enabled = true
 http_fetch_timeout_secs = 15

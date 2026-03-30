@@ -1,5 +1,13 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
+
+/// Skill metadata returned by the API
+#[derive(Serialize)]
+pub struct SkillMetadata {
+    pub name: String,
+    pub description: String,
+    pub content: String,
+}
 
 /// A loaded, validated skill
 pub struct Skill {
@@ -85,6 +93,18 @@ impl SkillManager {
         }
 
         result
+    }
+
+    /// Return metadata for all loaded skills (for API responses).
+    pub fn skills_metadata(&self) -> Vec<SkillMetadata> {
+        self.skills
+            .iter()
+            .map(|s| SkillMetadata {
+                name: s.name.clone(),
+                description: s.description.clone(),
+                content: s.content.clone(),
+            })
+            .collect()
     }
 
     fn load_skill(path: &Path, available_tools: &[String]) -> anyhow::Result<Option<Skill>> {
