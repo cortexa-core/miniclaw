@@ -1,15 +1,8 @@
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    Json,
-};
-use std::sync::Arc;
 use super::http::HttpState;
+use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use std::sync::Arc;
 
-pub async fn get_config(
-    State(state): State<Arc<HttpState>>,
-) -> impl IntoResponse {
+pub async fn get_config(State(state): State<Arc<HttpState>>) -> impl IntoResponse {
     match crate::config::Config::load(&state.config_path) {
         Ok(config) => {
             let mut json = serde_json::to_value(&config).unwrap_or_default();
@@ -29,10 +22,12 @@ pub async fn post_config(
 ) -> impl IntoResponse {
     let toml_str = match json_config_to_toml(&new_config) {
         Ok(t) => t,
-        Err(e) => return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": format!("Invalid config: {e}")})),
-        ),
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid config: {e}")})),
+            )
+        }
     };
 
     if let Err(e) = toml::from_str::<crate::config::Config>(&toml_str) {
@@ -51,7 +46,9 @@ pub async fn post_config(
 
     (
         StatusCode::OK,
-        Json(serde_json::json!({"status": "saved", "message": "Config saved. Restart agent to apply changes."})),
+        Json(
+            serde_json::json!({"status": "saved", "message": "Config saved. Restart agent to apply changes."}),
+        ),
     )
 }
 
@@ -78,6 +75,5 @@ fn mask_api_keys(value: &mut serde_json::Value) {
 fn json_config_to_toml(json: &serde_json::Value) -> Result<String, String> {
     let config: crate::config::Config = serde_json::from_value(json.clone())
         .map_err(|e| format!("Invalid config structure: {e}"))?;
-    toml::to_string_pretty(&config)
-        .map_err(|e| format!("Failed to serialize to TOML: {e}"))
+    toml::to_string_pretty(&config).map_err(|e| format!("Failed to serialize to TOML: {e}"))
 }

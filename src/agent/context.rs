@@ -2,10 +2,10 @@ use anyhow::Result;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use crate::llm::types::{Context, ToolSchema};
-use crate::utils::floor_char_boundary;
 use super::memory::Session;
 use super::skills::SkillManager;
+use crate::llm::types::{Context, ToolSchema};
+use crate::utils::floor_char_boundary;
 
 pub struct ContextBuilder {
     data_dir: PathBuf,
@@ -145,7 +145,9 @@ impl ContextBuilder {
         parts.push(self.device_context());
 
         // 4. MEMORY.md
-        let memory = self.read_budgeted("memory/MEMORY.md", self.budgets.memory_max).await;
+        let memory = self
+            .read_budgeted("memory/MEMORY.md", self.budgets.memory_max)
+            .await;
         if !memory.is_empty() {
             parts.push(format!("## Long-term Memory\n\n{memory}"));
         }
@@ -228,8 +230,6 @@ impl ContextBuilder {
         }
         notes.join("\n\n")
     }
-
-
 }
 
 /// Truncate a string at a paragraph boundary (double newline) near max_bytes.

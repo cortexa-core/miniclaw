@@ -47,11 +47,17 @@ pub struct Output {
 
 impl Output {
     pub fn text(content: String) -> Self {
-        Self { content, usage: None }
+        Self {
+            content,
+            usage: None,
+        }
     }
 
     pub fn with_usage(content: String, usage: Usage) -> Self {
-        Self { content, usage: Some(usage) }
+        Self {
+            content,
+            usage: Some(usage),
+        }
     }
 }
 
@@ -65,7 +71,10 @@ fn validate_session_id(id: &str) -> Result<()> {
         return Err(anyhow!("Session ID too long (max 128 characters)"));
     }
     // Allow only alphanumeric, hyphens, underscores, and dots (no path separators or ..)
-    if !id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.') {
+    if !id
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.')
+    {
         return Err(anyhow!(
             "Session ID contains invalid characters (only alphanumeric, hyphens, underscores, dots allowed)"
         ));
@@ -93,11 +102,13 @@ impl Agent {
         };
 
         // Initialize context builder with skill manager
-        let mut context_builder = ContextBuilder::new(
-            data_dir.clone(),
-            config.agent.context_cache_ttl_secs,
-        );
-        let tool_names: Vec<String> = tool_registry.tool_names().iter().map(|s| s.to_string()).collect();
+        let mut context_builder =
+            ContextBuilder::new(data_dir.clone(), config.agent.context_cache_ttl_secs);
+        let tool_names: Vec<String> = tool_registry
+            .tool_names()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         context_builder.set_available_tools(tool_names);
 
         Self {
@@ -116,10 +127,12 @@ impl Agent {
     /// Run session garbage collection using config limits.
     /// Should be called once at startup before processing requests.
     pub async fn cleanup_sessions(&mut self) -> Result<usize> {
-        self.session_store.cleanup_sessions(
-            self.full_config.agent.session_max_age_days,
-            self.full_config.agent.session_max_count,
-        ).await
+        self.session_store
+            .cleanup_sessions(
+                self.full_config.agent.session_max_age_days,
+                self.full_config.agent.session_max_count,
+            )
+            .await
     }
 
     /// Process one input with a timeout guard.
@@ -151,7 +164,8 @@ impl Agent {
         };
         if needs_consolidation {
             let session = self.session_store.get_or_load(&input.session_id).await;
-            if let Err(e) = self.memory
+            if let Err(e) = self
+                .memory
                 .consolidate(session, &*self.llm, self.config.memory_max_bytes)
                 .await
             {
@@ -169,7 +183,11 @@ impl Agent {
         // ReAct loop
         let mut total_usage = Usage::default();
         for iteration in 0..self.config.max_iterations {
-            tracing::debug!("Agent iteration {}/{}", iteration + 1, self.config.max_iterations);
+            tracing::debug!(
+                "Agent iteration {}/{}",
+                iteration + 1,
+                self.config.max_iterations
+            );
 
             // Build context
             let tool_schemas = self.tool_registry.schemas();
@@ -205,7 +223,9 @@ impl Agent {
                     session.add_tool_use_message(&response);
 
                     // Execute tools in parallel
-                    let max_calls = self.config.max_tool_calls_per_iteration
+                    let max_calls = self
+                        .config
+                        .max_tool_calls_per_iteration
                         .min(response.tool_calls.len());
                     let tool_calls = &response.tool_calls[..max_calls];
 
@@ -217,7 +237,8 @@ impl Agent {
 
                     let results: Vec<ToolResult> =
                         futures::future::join_all(tool_calls.iter().map(|tc| {
-                            self.tool_registry.execute(&tc.name, tc.arguments.clone(), &ctx)
+                            self.tool_registry
+                                .execute(&tc.name, tc.arguments.clone(), &ctx)
                         }))
                         .await;
 
@@ -227,7 +248,11 @@ impl Agent {
                         tracing::info!(
                             "Tool {} result: {}",
                             tc.name,
-                            if result.is_error() { "error" } else { "success" }
+                            if result.is_error() {
+                                "error"
+                            } else {
+                                "success"
+                            }
                         );
                         session.add_tool_result(&tc.id, result);
                     }

@@ -97,8 +97,12 @@ mod tests {
 
     #[async_trait]
     impl Tool for DummyTool {
-        fn name(&self) -> &str { "dummy" }
-        fn description(&self) -> &str { "A dummy tool for testing" }
+        fn name(&self) -> &str {
+            "dummy"
+        }
+        fn description(&self) -> &str {
+            "A dummy tool for testing"
+        }
         fn parameters_schema(&self) -> serde_json::Value {
             json!({"type": "object", "properties": {}})
         }
@@ -111,9 +115,10 @@ mod tests {
         ToolContext {
             data_dir: PathBuf::from("/tmp/uniclaw-test"),
             session_id: "test".into(),
-            config: Arc::new(toml::from_str::<Config>(
-                "[agent]\n[llm]\nprovider=\"anthropic\"\nmodel=\"test\""
-            ).unwrap()),
+            config: Arc::new(
+                toml::from_str::<Config>("[agent]\n[llm]\nprovider=\"anthropic\"\nmodel=\"test\"")
+                    .unwrap(),
+            ),
         }
     }
 

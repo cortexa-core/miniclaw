@@ -67,12 +67,17 @@ impl StdioTransport {
             cmd.env(key, value);
         }
 
-        let mut child = cmd.spawn()
+        let mut child = cmd
+            .spawn()
             .map_err(|e| anyhow!("Failed to spawn MCP server '{command}': {e}"))?;
 
-        let stdin = child.stdin.take()
+        let stdin = child
+            .stdin
+            .take()
             .ok_or_else(|| anyhow!("Failed to capture MCP server stdin"))?;
-        let stdout = child.stdout.take()
+        let stdout = child
+            .stdout
+            .take()
             .ok_or_else(|| anyhow!("Failed to capture MCP server stdout"))?;
 
         Ok(Self {
@@ -126,7 +131,9 @@ impl StdioTransport {
             .map_err(|_| anyhow!("MCP server response timed out (30s)"))??;
 
             if bytes == 0 {
-                return Err(anyhow!("MCP server closed stdout (process may have crashed)"));
+                return Err(anyhow!(
+                    "MCP server closed stdout (process may have crashed)"
+                ));
             }
 
             let trimmed = line.trim();
@@ -175,7 +182,8 @@ impl HttpTransport {
     async fn request(&self, method: &str, params: Option<Value>) -> Result<Value> {
         let req = JsonRpcRequest::new(method, params);
 
-        let response = self.client
+        let response = self
+            .client
             .post(&self.url)
             .header("content-type", "application/json")
             .json(&req)
@@ -187,7 +195,9 @@ impl HttpTransport {
             return Err(anyhow!("MCP HTTP error: {}", response.status()));
         }
 
-        let resp: JsonRpcResponse = response.json().await
+        let resp: JsonRpcResponse = response
+            .json()
+            .await
             .map_err(|e| anyhow!("MCP HTTP response parse error: {e}"))?;
 
         resp.into_result()

@@ -3,15 +3,15 @@
 //! Connects UniClaw to external MCP servers, discovers their tools,
 //! and registers them alongside built-in tools.
 
+pub mod client;
 pub mod protocol;
 pub mod transport;
-pub mod client;
 
 use async_trait::async_trait;
 use std::sync::Arc;
 
+use crate::tools::registry::{Tool, ToolContext, ToolRegistry, ToolResult};
 use client::{McpClient, McpServerConfig};
-use crate::tools::registry::{Tool, ToolContext, ToolResult, ToolRegistry};
 
 /// Wraps an MCP tool as a local Tool trait impl.
 /// The agent loop doesn't know or care that this tool is from MCP.
@@ -68,7 +68,8 @@ pub async fn register_mcp_tools(
                     if existing_names.contains(&tool_name.as_str()) {
                         tracing::warn!(
                             "MCP '{}': tool '{}' conflicts with existing tool, skipping",
-                            config.name, tool_name
+                            config.name,
+                            tool_name
                         );
                         continue;
                     }
@@ -87,10 +88,7 @@ pub async fn register_mcp_tools(
                     registered += 1;
                 }
 
-                tracing::info!(
-                    "MCP '{}': {registered} tools registered",
-                    config.name
-                );
+                tracing::info!("MCP '{}': {registered} tools registered", config.name);
                 clients.push(client);
             }
             Err(e) => {

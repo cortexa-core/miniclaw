@@ -30,7 +30,9 @@ impl Message {
     pub fn user(text: &str) -> Self {
         Self {
             role: Role::User,
-            content: MessageContent::Text { text: text.to_string() },
+            content: MessageContent::Text {
+                text: text.to_string(),
+            },
         }
     }
 
@@ -38,7 +40,9 @@ impl Message {
     pub fn assistant(text: &str) -> Self {
         Self {
             role: Role::Assistant,
-            content: MessageContent::Text { text: text.to_string() },
+            content: MessageContent::Text {
+                text: text.to_string(),
+            },
         }
     }
 
@@ -62,9 +66,7 @@ impl Message {
     pub fn content_text(&self) -> &str {
         match &self.content {
             MessageContent::Text { text } => text,
-            MessageContent::ToolUse { text, .. } => {
-                text.as_deref().unwrap_or("[tool call]")
-            }
+            MessageContent::ToolUse { text, .. } => text.as_deref().unwrap_or("[tool call]"),
             MessageContent::ToolResult { content, .. } => content,
         }
     }
@@ -91,7 +93,9 @@ impl std::fmt::Display for Role {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MessageContent {
-    Text { text: String },
+    Text {
+        text: String,
+    },
     ToolUse {
         text: Option<String>,
         tool_calls: Vec<ToolCall>,

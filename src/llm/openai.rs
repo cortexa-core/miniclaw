@@ -71,7 +71,10 @@ impl OpenAiProvider {
                     assistant_msg["tool_calls"] = json!(calls);
                     messages.push(assistant_msg);
                 }
-                MessageContent::ToolResult { tool_use_id, content } => {
+                MessageContent::ToolResult {
+                    tool_use_id,
+                    content,
+                } => {
                     messages.push(json!({
                         "role": "tool",
                         "tool_call_id": tool_use_id,

@@ -60,10 +60,7 @@ pub async fn heartbeat_task(
             match tokio::time::timeout(Duration::from_secs(120), reply_rx).await {
                 Ok(Ok(output)) => {
                     let end = floor_char_boundary(&output.content, 200);
-                    tracing::info!(
-                        "Heartbeat response: {}",
-                        &output.content[..end]
-                    );
+                    tracing::info!("Heartbeat response: {}", &output.content[..end]);
                 }
                 Ok(Err(_)) => tracing::warn!("Heartbeat: agent worker dropped request"),
                 Err(_) => tracing::warn!("Heartbeat: timed out (120s)"),

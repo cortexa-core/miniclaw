@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use serde_json::json;
 
-use crate::server::cron::{self, CronJob, CronSchedule};
 use super::registry::{Tool, ToolContext, ToolResult};
+use crate::server::cron::{self, CronJob, CronSchedule};
 
 // --- CronAddTool ---
 
@@ -10,7 +10,9 @@ pub struct CronAddTool;
 
 #[async_trait]
 impl Tool for CronAddTool {
-    fn name(&self) -> &str { "cron_add" }
+    fn name(&self) -> &str {
+        "cron_add"
+    }
 
     fn description(&self) -> &str {
         "Schedule a recurring task. The action is a natural language description \
@@ -45,12 +47,11 @@ impl Tool for CronAddTool {
         };
         let interval = match args["interval_seconds"].as_u64() {
             Some(s) => s,
-            None => return ToolResult::Error("Missing required parameter: interval_seconds".into()),
+            None => {
+                return ToolResult::Error("Missing required parameter: interval_seconds".into())
+            }
         };
-        let name = args["name"]
-            .as_str()
-            .unwrap_or("Unnamed job")
-            .to_string();
+        let name = args["name"].as_str().unwrap_or("Unnamed job").to_string();
 
         let id = uuid::Uuid::new_v4().to_string()[..8].to_string();
 
@@ -87,7 +88,9 @@ pub struct CronListTool;
 
 #[async_trait]
 impl Tool for CronListTool {
-    fn name(&self) -> &str { "cron_list" }
+    fn name(&self) -> &str {
+        "cron_list"
+    }
 
     fn description(&self) -> &str {
         "List all scheduled cron jobs."
@@ -114,7 +117,10 @@ impl Tool for CronListTool {
                 let status = if j.enabled { "enabled" } else { "disabled" };
                 format!(
                     "- [{}] {} (id={}) — {} — {}\n  Action: {}",
-                    status, j.name, j.id, schedule_desc,
+                    status,
+                    j.name,
+                    j.id,
+                    schedule_desc,
                     j.last_run
                         .map(|t| format!("last run: {}", t.format("%Y-%m-%d %H:%M")))
                         .unwrap_or_else(|| "never run".into()),
@@ -133,7 +139,9 @@ pub struct CronRemoveTool;
 
 #[async_trait]
 impl Tool for CronRemoveTool {
-    fn name(&self) -> &str { "cron_remove" }
+    fn name(&self) -> &str {
+        "cron_remove"
+    }
 
     fn description(&self) -> &str {
         "Remove a scheduled cron job by its ID."
@@ -217,9 +225,7 @@ mod tests {
         let job_id = jobs[0].id.clone();
 
         // Remove the job
-        let result = CronRemoveTool
-            .execute(json!({"id": job_id}), &ctx)
-            .await;
+        let result = CronRemoveTool.execute(json!({"id": job_id}), &ctx).await;
         assert!(!result.is_error());
 
         // List should be empty now

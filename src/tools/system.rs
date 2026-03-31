@@ -25,7 +25,11 @@ impl Tool for SystemInfoTool {
     async fn execute(&self, _args: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
         let mut info = Vec::new();
 
-        info.push(format!("OS: {} {}", std::env::consts::OS, std::env::consts::ARCH));
+        info.push(format!(
+            "OS: {} {}",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        ));
         info.push(format!("UniClaw version: {}", env!("CARGO_PKG_VERSION")));
 
         // Memory info (Linux)

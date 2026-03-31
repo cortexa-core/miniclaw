@@ -25,8 +25,16 @@ pub async fn mqtt_task(
     config: &Config,
     inbound_tx: mpsc::Sender<(Input, oneshot::Sender<Output>)>,
 ) -> Result<()> {
-    let device_id = &config.server.as_ref().map(|s| s.mqtt_device_id.as_str()).unwrap_or("uniclaw-01");
-    let broker = config.server.as_ref().map(|s| s.mqtt_broker.as_str()).unwrap_or("localhost");
+    let device_id = &config
+        .server
+        .as_ref()
+        .map(|s| s.mqtt_device_id.as_str())
+        .unwrap_or("uniclaw-01");
+    let broker = config
+        .server
+        .as_ref()
+        .map(|s| s.mqtt_broker.as_str())
+        .unwrap_or("localhost");
     let port = config.server.as_ref().map(|s| s.mqtt_port).unwrap_or(1883);
 
     let truncated_id: String = device_id.chars().take(8).collect();

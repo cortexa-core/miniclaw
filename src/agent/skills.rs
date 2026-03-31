@@ -67,7 +67,11 @@ impl SkillManager {
             }
         }
 
-        tracing::info!("Loaded {} skills from {}", skills.len(), skills_dir.display());
+        tracing::info!(
+            "Loaded {} skills from {}",
+            skills.len(),
+            skills_dir.display()
+        );
         Self { skills }
     }
 
@@ -78,7 +82,8 @@ impl SkillManager {
             return String::new();
         }
 
-        let parts: Vec<String> = self.skills
+        let parts: Vec<String> = self
+            .skills
             .iter()
             .map(|s| format!("### {}\n\n{}", s.name, s.content))
             .collect();
@@ -147,9 +152,13 @@ impl SkillManager {
             return Err(anyhow::anyhow!("No YAML frontmatter (must start with ---)"));
         }
         let after_first = &trimmed[3..];
-        let end = after_first.find("\n---")
+        let end = after_first
+            .find("\n---")
             .ok_or_else(|| anyhow::anyhow!("No closing --- for frontmatter"))?;
-        Ok((after_first[..end].trim().to_string(), after_first[end + 4..].to_string()))
+        Ok((
+            after_first[..end].trim().to_string(),
+            after_first[end + 4..].to_string(),
+        ))
     }
 }
 
@@ -186,8 +195,7 @@ fn parse_yaml_frontmatter(frontmatter: &str) -> anyhow::Result<SkillFrontmatter>
     }
 
     let toml_str = toml_lines.join("\n");
-    toml::from_str(&toml_str)
-        .map_err(|e| anyhow::anyhow!("Failed to parse skill frontmatter: {e}"))
+    toml::from_str(&toml_str).map_err(|e| anyhow::anyhow!("Failed to parse skill frontmatter: {e}"))
 }
 
 fn yaml_value_to_toml(value: &str) -> String {
@@ -196,7 +204,8 @@ fn yaml_value_to_toml(value: &str) -> String {
     }
     if value.starts_with('[') && value.ends_with(']') {
         let inner = &value[1..value.len() - 1];
-        let elements: Vec<String> = inner.split(',')
+        let elements: Vec<String> = inner
+            .split(',')
             .map(|e| {
                 let e = e.trim().trim_matches('"').trim_matches('\'');
                 if e.parse::<u64>().is_ok() || e == "true" || e == "false" {
@@ -249,8 +258,11 @@ mod tests {
     fn test_load_and_gate_by_tools() {
         let dir = tempfile::tempdir().unwrap();
 
-        std::fs::write(dir.path().join("valid.md"),
-            "---\nname: valid\ndescription: Works\n---\n\nDo stuff.").unwrap();
+        std::fs::write(
+            dir.path().join("valid.md"),
+            "---\nname: valid\ndescription: Works\n---\n\nDo stuff.",
+        )
+        .unwrap();
 
         std::fs::write(dir.path().join("gated.md"),
             "---\nname: gated\ndescription: Needs special\nrequires:\n  tools: [nonexistent]\n---\n\nWon't load.").unwrap();
@@ -279,8 +291,16 @@ mod tests {
     fn test_prompt_content_all_injected() {
         let mgr = SkillManager {
             skills: vec![
-                Skill { name: "a".into(), description: "".into(), content: "Skill A content.".into() },
-                Skill { name: "b".into(), description: "".into(), content: "Skill B content.".into() },
+                Skill {
+                    name: "a".into(),
+                    description: "".into(),
+                    content: "Skill A content.".into(),
+                },
+                Skill {
+                    name: "b".into(),
+                    description: "".into(),
+                    content: "Skill B content.".into(),
+                },
             ],
         };
         let result = mgr.prompt_content();
@@ -297,8 +317,11 @@ mod tests {
     #[test]
     fn test_empty_body_skipped() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("empty.md"),
-            "---\nname: empty\ndescription: No body\n---\n\n").unwrap();
+        std::fs::write(
+            dir.path().join("empty.md"),
+            "---\nname: empty\ndescription: No body\n---\n\n",
+        )
+        .unwrap();
         let mgr = SkillManager::load(dir.path(), &[]);
         assert_eq!(mgr.skills.len(), 0);
     }

@@ -45,7 +45,9 @@ impl Channel for TelegramChannel {
         let bot = Bot::new(&self.bot_token);
 
         // Verify bot token
-        let me = bot.get_me().await
+        let me = bot
+            .get_me()
+            .await
             .map_err(|e| anyhow!("Failed to connect to Telegram: {e}"))?;
         tracing::info!(
             "Telegram bot connected: @{} ({})",
@@ -87,7 +89,8 @@ impl Channel for TelegramChannel {
                             // "mention" mode
                             let mentioned = !bot_username.is_empty()
                                 && text.contains(&format!("@{bot_username}"));
-                            let is_reply_to_bot = msg.reply_to_message()
+                            let is_reply_to_bot = msg
+                                .reply_to_message()
                                 .and_then(|r| r.from.as_ref())
                                 .map(|u| u.is_bot)
                                 .unwrap_or(false);
@@ -101,7 +104,9 @@ impl Channel for TelegramChannel {
 
                 // Strip @bot_username from the text if present
                 let clean_text = if !bot_username.is_empty() {
-                    text.replace(&format!("@{bot_username}"), "").trim().to_string()
+                    text.replace(&format!("@{bot_username}"), "")
+                        .trim()
+                        .to_string()
                 } else {
                     text
                 };
@@ -111,7 +116,9 @@ impl Channel for TelegramChannel {
                 }
 
                 // Send typing indicator
-                bot.send_chat_action(msg.chat.id, ChatAction::Typing).await.ok();
+                bot.send_chat_action(msg.chat.id, ChatAction::Typing)
+                    .await
+                    .ok();
 
                 // Session per user
                 let session_id = format!("telegram:{user_id}");
@@ -126,23 +133,24 @@ impl Channel for TelegramChannel {
 
                 if agent_tx.send((input, reply_tx)).await.is_err() {
                     bot.send_message(msg.chat.id, "Agent is unavailable. Please try again later.")
-                        .await.ok();
+                        .await
+                        .ok();
                     return Ok(());
                 }
 
-                let response = match tokio::time::timeout(
-                    std::time::Duration::from_secs(120),
-                    reply_rx,
-                ).await {
-                    Ok(Ok(output)) => output.content,
-                    Ok(Err(_)) => "Something went wrong. Please try again.".to_string(),
-                    Err(_) => "Request timed out. Please try again.".to_string(),
-                };
+                let response =
+                    match tokio::time::timeout(std::time::Duration::from_secs(120), reply_rx).await
+                    {
+                        Ok(Ok(output)) => output.content,
+                        Ok(Err(_)) => "Something went wrong. Please try again.".to_string(),
+                        Err(_) => "Request timed out. Please try again.".to_string(),
+                    };
 
                 // Chunk and send (Telegram max 4096 chars)
                 for chunk in chunk_message(&response, 4096) {
                     // Try Markdown first, fall back to plain text
-                    let result = bot.send_message(msg.chat.id, &chunk)
+                    let result = bot
+                        .send_message(msg.chat.id, &chunk)
                         .parse_mode(ParseMode::MarkdownV2)
                         .await;
 
@@ -181,7 +189,8 @@ fn chunk_message(text: &str, max_len: usize) -> Vec<String> {
         }
 
         let search = &remaining[..end];
-        let split_at = search.rfind("\n\n")
+        let split_at = search
+            .rfind("\n\n")
             .or_else(|| search.rfind('\n'))
             .or_else(|| search.rfind(' '))
             .unwrap_or(end);

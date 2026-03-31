@@ -60,10 +60,7 @@ impl MockLlmClient {
     }
 
     /// Returns multiple tool calls simultaneously, then text
-    fn multi_tool_then_text(
-        calls: Vec<(&str, serde_json::Value)>,
-        final_text: &str,
-    ) -> Self {
+    fn multi_tool_then_text(calls: Vec<(&str, serde_json::Value)>, final_text: &str) -> Self {
         let tool_calls: Vec<ToolCall> = calls
             .into_iter()
             .enumerate()
@@ -121,7 +118,6 @@ impl MockLlmClient {
             recorded_contexts: Mutex::new(Vec::new()),
         }
     }
-
 }
 
 #[async_trait]
@@ -203,7 +199,10 @@ async fn test_single_tool_call() {
         dir.path(),
     );
 
-    let output = agent.process(&test_input("What time is it?")).await.unwrap();
+    let output = agent
+        .process(&test_input("What time is it?"))
+        .await
+        .unwrap();
     assert_eq!(output.content, "It's 3:42 PM.");
 }
 
@@ -211,10 +210,7 @@ async fn test_single_tool_call() {
 async fn test_multi_tool_parallel() {
     let dir = tempfile::tempdir().unwrap();
     let mock = MockLlmClient::multi_tool_then_text(
-        vec![
-            ("get_time", json!({})),
-            ("system_info", json!({})),
-        ],
+        vec![("get_time", json!({})), ("system_info", json!({}))],
         "Time is 3:42 PM and system is healthy.",
     );
     let mut agent = make_agent(mock, dir.path());
@@ -284,7 +280,10 @@ async fn test_llm_all_fail() {
 
     let result = agent.process(&test_input("Hello")).await;
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("All LLM providers failed"));
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("All LLM providers failed"));
 }
 
 #[tokio::test]
@@ -354,7 +353,10 @@ async fn test_file_tool_via_agent() {
         "File written!",
     );
     let mut agent = make_agent(mock, dir.path());
-    let output = agent.process(&test_input("Write hello to test.txt")).await.unwrap();
+    let output = agent
+        .process(&test_input("Write hello to test.txt"))
+        .await
+        .unwrap();
     assert_eq!(output.content, "File written!");
 
     // Verify the file was actually created
@@ -367,14 +369,14 @@ async fn test_file_tool_via_agent() {
 #[tokio::test]
 async fn test_unknown_tool() {
     let dir = tempfile::tempdir().unwrap();
-    let mock = MockLlmClient::tool_then_text(
-        "nonexistent_tool",
-        json!({}),
-        "Sorry, that didn't work.",
-    );
+    let mock =
+        MockLlmClient::tool_then_text("nonexistent_tool", json!({}), "Sorry, that didn't work.");
     let mut agent = make_agent(mock, dir.path());
 
     // Should not crash — agent handles unknown tool gracefully
-    let output = agent.process(&test_input("Do something impossible")).await.unwrap();
+    let output = agent
+        .process(&test_input("Do something impossible"))
+        .await
+        .unwrap();
     assert_eq!(output.content, "Sorry, that didn't work.");
 }

@@ -9,7 +9,9 @@ pub struct MemoryStoreTool;
 
 #[async_trait]
 impl Tool for MemoryStoreTool {
-    fn name(&self) -> &str { "memory_store" }
+    fn name(&self) -> &str {
+        "memory_store"
+    }
 
     fn description(&self) -> &str {
         "Store a fact or piece of information in long-term memory. Use this when the user \
@@ -66,7 +68,9 @@ pub struct MemoryReadTool;
 
 #[async_trait]
 impl Tool for MemoryReadTool {
-    fn name(&self) -> &str { "memory_read" }
+    fn name(&self) -> &str {
+        "memory_read"
+    }
 
     fn description(&self) -> &str {
         "Read long-term memory contents. Optionally search for a specific key."
@@ -147,9 +151,7 @@ mod tests {
         assert!(result.content().contains("name: Jiekai"));
 
         // Read with key filter
-        let result = MemoryReadTool
-            .execute(json!({"key": "name"}), &ctx)
-            .await;
+        let result = MemoryReadTool.execute(json!({"key": "name"}), &ctx).await;
         assert!(result.content().contains("Jiekai"));
 
         // Read with nonexistent key

@@ -70,7 +70,8 @@ impl JsonRpcResponse {
         if let Some(err) = self.error {
             return Err(anyhow::anyhow!("MCP error ({}): {}", err.code, err.message));
         }
-        self.result.ok_or_else(|| anyhow::anyhow!("MCP response missing both result and error"))
+        self.result
+            .ok_or_else(|| anyhow::anyhow!("MCP response missing both result and error"))
     }
 }
 
@@ -163,9 +164,8 @@ mod tests {
 
     #[test]
     fn test_response_success() {
-        let resp: JsonRpcResponse = serde_json::from_str(
-            r#"{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}"#
-        ).unwrap();
+        let resp: JsonRpcResponse =
+            serde_json::from_str(r#"{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}"#).unwrap();
         assert!(resp.error.is_none());
         let result = resp.into_result().unwrap();
         assert!(result["tools"].is_array());
@@ -174,8 +174,9 @@ mod tests {
     #[test]
     fn test_response_error() {
         let resp: JsonRpcResponse = serde_json::from_str(
-            r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"Invalid request"}}"#
-        ).unwrap();
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"Invalid request"}}"#,
+        )
+        .unwrap();
         let err = resp.into_result().unwrap_err();
         assert!(err.to_string().contains("Invalid request"));
     }

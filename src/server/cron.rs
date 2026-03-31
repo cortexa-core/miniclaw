@@ -19,7 +19,9 @@ pub struct CronJob {
     pub enabled: bool,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -34,18 +36,14 @@ impl CronJob {
             return false;
         }
         match &self.schedule {
-            CronSchedule::Every { seconds } => {
-                match self.last_run {
-                    None => true,
-                    Some(last) => {
-                        let elapsed = (now - last).num_seconds();
-                        elapsed >= *seconds as i64
-                    }
+            CronSchedule::Every { seconds } => match self.last_run {
+                None => true,
+                Some(last) => {
+                    let elapsed = (now - last).num_seconds();
+                    elapsed >= *seconds as i64
                 }
-            }
-            CronSchedule::Once { at } => {
-                self.last_run.is_none() && now >= *at
-            }
+            },
+            CronSchedule::Once { at } => self.last_run.is_none() && now >= *at,
         }
     }
 }
@@ -217,7 +215,9 @@ mod tests {
             last_run: None,
             enabled: true,
         }];
-        save_cron_jobs(&dir.path().to_path_buf(), &jobs).await.unwrap();
+        save_cron_jobs(&dir.path().to_path_buf(), &jobs)
+            .await
+            .unwrap();
         let loaded = load_cron_jobs(&dir.path().to_path_buf()).await;
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].name, "Test Job");

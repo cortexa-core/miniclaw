@@ -149,8 +149,8 @@ impl Config {
     pub fn load(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| anyhow!("Failed to read config at {}: {e}", path.display()))?;
-        let config: Config = toml::from_str(&content)
-            .map_err(|e| anyhow!("Failed to parse config: {e}"))?;
+        let config: Config =
+            toml::from_str(&content).map_err(|e| anyhow!("Failed to parse config: {e}"))?;
         Ok(config)
     }
 }
@@ -165,30 +165,78 @@ impl LlmConfig {
     }
 }
 
-fn default_max_iterations() -> usize { 10 }
-fn default_max_tool_calls() -> usize { 4 }
-fn default_consolidation() -> usize { 40 }
-fn default_cache_ttl() -> u64 { 60 }
-fn default_memory_max() -> usize { 8192 }
-fn default_request_timeout() -> u64 { 120 }
-fn default_session_age() -> u64 { 30 }
-fn default_session_count() -> usize { 100 }
-fn default_base_url() -> String { "https://api.anthropic.com".to_string() }
-fn default_max_tokens() -> u32 { 1024 }
-fn default_temperature() -> f32 { 0.7 }
-fn default_timeout() -> u64 { 60 }
-fn default_true() -> bool { true }
-fn default_shell_timeout() -> u64 { 10 }
-fn default_http_timeout() -> u64 { 15 }
-fn default_log_level() -> String { "info".to_string() }
-fn default_http_port() -> u16 { 3000 }
-fn default_http_bind() -> String { "0.0.0.0".to_string() }
-fn default_mqtt_broker() -> String { "localhost".to_string() }
-fn default_mqtt_port() -> u16 { 1883 }
-fn default_device_id() -> String { "uniclaw-01".to_string() }
-fn default_cron_interval() -> u64 { 60 }
-fn default_heartbeat_interval() -> u64 { 1800 }
-fn default_respond_in_groups() -> String { "mention".to_string() }
+fn default_max_iterations() -> usize {
+    10
+}
+fn default_max_tool_calls() -> usize {
+    4
+}
+fn default_consolidation() -> usize {
+    40
+}
+fn default_cache_ttl() -> u64 {
+    60
+}
+fn default_memory_max() -> usize {
+    8192
+}
+fn default_request_timeout() -> u64 {
+    120
+}
+fn default_session_age() -> u64 {
+    30
+}
+fn default_session_count() -> usize {
+    100
+}
+fn default_base_url() -> String {
+    "https://api.anthropic.com".to_string()
+}
+fn default_max_tokens() -> u32 {
+    1024
+}
+fn default_temperature() -> f32 {
+    0.7
+}
+fn default_timeout() -> u64 {
+    60
+}
+fn default_true() -> bool {
+    true
+}
+fn default_shell_timeout() -> u64 {
+    10
+}
+fn default_http_timeout() -> u64 {
+    15
+}
+fn default_log_level() -> String {
+    "info".to_string()
+}
+fn default_http_port() -> u16 {
+    3000
+}
+fn default_http_bind() -> String {
+    "0.0.0.0".to_string()
+}
+fn default_mqtt_broker() -> String {
+    "localhost".to_string()
+}
+fn default_mqtt_port() -> u16 {
+    1883
+}
+fn default_device_id() -> String {
+    "uniclaw-01".to_string()
+}
+fn default_cron_interval() -> u64 {
+    60
+}
+fn default_heartbeat_interval() -> u64 {
+    1800
+}
+fn default_respond_in_groups() -> String {
+    "mention".to_string()
+}
 
 #[cfg(test)]
 mod tests {

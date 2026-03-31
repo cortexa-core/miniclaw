@@ -18,7 +18,11 @@ use agent::{Agent, Input, Output};
 use config::Config;
 
 #[derive(Parser)]
-#[command(name = "uniclaw", version, about = "Privacy-first AI agent for ARM Linux SBCs")]
+#[command(
+    name = "uniclaw",
+    version,
+    about = "Privacy-first AI agent for ARM Linux SBCs"
+)]
 struct Cli {
     /// Path to config file
     #[arg(long, default_value = "config/config.toml")]
@@ -149,9 +153,7 @@ async fn create_agent(config: &Config, data_dir: &PathBuf) -> Result<Agent> {
 
 /// Spawn the agent worker task. Returns the inbound sender.
 /// The agent worker is the sole owner of Agent — processes one request at a time.
-fn spawn_agent_worker(
-    mut agent: Agent,
-) -> mpsc::Sender<(Input, oneshot::Sender<Output>)> {
+fn spawn_agent_worker(mut agent: Agent) -> mpsc::Sender<(Input, oneshot::Sender<Output>)> {
     let (inbound_tx, mut inbound_rx) = mpsc::channel::<(Input, oneshot::Sender<Output>)>(32);
 
     tokio::spawn(async move {
@@ -163,9 +165,7 @@ fn spawn_agent_worker(
                 }
                 Err(e) => {
                     tracing::error!("Agent error: {e}");
-                    reply_tx
-                        .send(Output::text(format!("Error: {e}")))
-                        .ok();
+                    reply_tx.send(Output::text(format!("Error: {e}"))).ok();
                 }
             }
         }
@@ -259,16 +259,29 @@ async fn run_serve(config_path: &PathBuf, data_dir: &PathBuf) -> Result<()> {
     let agent = create_agent(&config, data_dir).await?;
     let inbound_tx = spawn_agent_worker(agent);
 
-    tracing::info!("UniClaw v{} starting server mode", env!("CARGO_PKG_VERSION"));
+    tracing::info!(
+        "UniClaw v{} starting server mode",
+        env!("CARGO_PKG_VERSION")
+    );
 
     let mut tasks = Vec::new();
 
     // HTTP server
-    if config.server.as_ref().map(|s| s.http_enabled).unwrap_or(true) {
-        let api_token = config.server.as_ref()
+    if config
+        .server
+        .as_ref()
+        .map(|s| s.http_enabled)
+        .unwrap_or(true)
+    {
+        let api_token = config
+            .server
+            .as_ref()
             .and_then(|s| {
-                if s.api_token_env.is_empty() { None }
-                else { std::env::var(&s.api_token_env).ok() }
+                if s.api_token_env.is_empty() {
+                    None
+                } else {
+                    std::env::var(&s.api_token_env).ok()
+                }
             })
             .unwrap_or_default();
 
@@ -306,7 +319,12 @@ async fn run_serve(config_path: &PathBuf, data_dir: &PathBuf) -> Result<()> {
     }
 
     // MQTT client
-    if config.server.as_ref().map(|s| s.mqtt_enabled).unwrap_or(false) {
+    if config
+        .server
+        .as_ref()
+        .map(|s| s.mqtt_enabled)
+        .unwrap_or(false)
+    {
         let mqtt_config = config.clone();
         let mqtt_tx = inbound_tx.clone();
         tasks.push(tokio::spawn(async move {
@@ -318,7 +336,11 @@ async fn run_serve(config_path: &PathBuf, data_dir: &PathBuf) -> Result<()> {
 
     // Cron scheduler
     if config.cron.as_ref().map(|c| c.enabled).unwrap_or(false) {
-        let cron_interval = config.cron.as_ref().map(|c| c.check_interval_secs).unwrap_or(60);
+        let cron_interval = config
+            .cron
+            .as_ref()
+            .map(|c| c.check_interval_secs)
+            .unwrap_or(60);
         let cron_dir = data_dir.clone();
         let cron_tx = inbound_tx.clone();
         tracing::info!("Cron scheduler enabled (check every {cron_interval}s)");
@@ -328,8 +350,17 @@ async fn run_serve(config_path: &PathBuf, data_dir: &PathBuf) -> Result<()> {
     }
 
     // Heartbeat service
-    if config.heartbeat.as_ref().map(|h| h.enabled).unwrap_or(false) {
-        let hb_interval = config.heartbeat.as_ref().map(|h| h.interval_secs).unwrap_or(1800);
+    if config
+        .heartbeat
+        .as_ref()
+        .map(|h| h.enabled)
+        .unwrap_or(false)
+    {
+        let hb_interval = config
+            .heartbeat
+            .as_ref()
+            .map(|h| h.interval_secs)
+            .unwrap_or(1800);
         let hb_dir = data_dir.clone();
         let hb_tx = inbound_tx.clone();
         tracing::info!("Heartbeat service enabled (every {hb_interval}s)");

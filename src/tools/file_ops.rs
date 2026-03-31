@@ -25,8 +25,8 @@ pub fn validate_path(data_dir: &Path, requested: &str) -> Result<PathBuf> {
     if joined.exists() {
         // Reject symlinks that point outside the sandbox (defense-in-depth)
         if joined.is_symlink() {
-            let target = std::fs::read_link(&joined)
-                .map_err(|e| anyhow!("Cannot read symlink: {e}"))?;
+            let target =
+                std::fs::read_link(&joined).map_err(|e| anyhow!("Cannot read symlink: {e}"))?;
             let resolved = if target.is_absolute() {
                 target
             } else {
@@ -71,7 +71,9 @@ pub struct ReadFileTool;
 
 #[async_trait]
 impl Tool for ReadFileTool {
-    fn name(&self) -> &str { "read_file" }
+    fn name(&self) -> &str {
+        "read_file"
+    }
 
     fn description(&self) -> &str {
         "Read the contents of a file from the data directory."
@@ -114,7 +116,9 @@ pub struct WriteFileTool;
 
 #[async_trait]
 impl Tool for WriteFileTool {
-    fn name(&self) -> &str { "write_file" }
+    fn name(&self) -> &str {
+        "write_file"
+    }
 
     fn description(&self) -> &str {
         "Write content to a file in the data directory. Creates parent directories if needed."
@@ -172,7 +176,9 @@ pub struct ListDirTool;
 
 #[async_trait]
 impl Tool for ListDirTool {
-    fn name(&self) -> &str { "list_dir" }
+    fn name(&self) -> &str {
+        "list_dir"
+    }
 
     fn description(&self) -> &str {
         "List files and directories in the data directory."
@@ -279,7 +285,10 @@ mod tests {
         {
             std::os::unix::fs::symlink("/tmp", &link_path).unwrap();
             let result = validate_path(dir.path(), "evil_link");
-            assert!(result.is_err(), "Symlink pointing outside sandbox should be rejected");
+            assert!(
+                result.is_err(),
+                "Symlink pointing outside sandbox should be rejected"
+            );
         }
     }
 
@@ -288,7 +297,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("hello.txt"), "world").unwrap();
         let ctx = test_ctx(dir.path());
-        let result = ReadFileTool.execute(json!({"path": "hello.txt"}), &ctx).await;
+        let result = ReadFileTool
+            .execute(json!({"path": "hello.txt"}), &ctx)
+            .await;
         assert!(!result.is_error());
         assert_eq!(result.content(), "world");
     }
@@ -297,7 +308,9 @@ mod tests {
     async fn test_read_file_not_found() {
         let dir = tempfile::tempdir().unwrap();
         let ctx = test_ctx(dir.path());
-        let result = ReadFileTool.execute(json!({"path": "nope.txt"}), &ctx).await;
+        let result = ReadFileTool
+            .execute(json!({"path": "nope.txt"}), &ctx)
+            .await;
         assert!(result.is_error());
     }
 
@@ -309,7 +322,10 @@ mod tests {
             .execute(json!({"path": "out.txt", "content": "hello"}), &ctx)
             .await;
         assert!(!result.is_error());
-        assert_eq!(std::fs::read_to_string(dir.path().join("out.txt")).unwrap(), "hello");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("out.txt")).unwrap(),
+            "hello"
+        );
     }
 
     #[tokio::test]
@@ -317,7 +333,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let ctx = test_ctx(dir.path());
         let result = WriteFileTool
-            .execute(json!({"path": "sub/dir/file.txt", "content": "nested"}), &ctx)
+            .execute(
+                json!({"path": "sub/dir/file.txt", "content": "nested"}),
+                &ctx,
+            )
             .await;
         assert!(!result.is_error());
         assert!(dir.path().join("sub/dir/file.txt").exists());

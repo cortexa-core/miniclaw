@@ -80,7 +80,10 @@ impl AnthropicProvider {
                         "content": content,
                     }));
                 }
-                MessageContent::ToolResult { tool_use_id, content } => {
+                MessageContent::ToolResult {
+                    tool_use_id,
+                    content,
+                } => {
                     result.push(json!({
                         "role": "user",
                         "content": [{

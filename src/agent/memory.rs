@@ -35,7 +35,9 @@ impl Session {
     pub fn add_message(&mut self, role: Role, content: &str) {
         self.messages.push(Message {
             role,
-            content: MessageContent::Text { text: content.to_string() },
+            content: MessageContent::Text {
+                text: content.to_string(),
+            },
         });
         self.updated_at = Utc::now();
     }
@@ -53,7 +55,8 @@ impl Session {
             ToolResult::Success(s) => s.clone(),
             ToolResult::Error(e) => format!("Error: {e}"),
         };
-        self.messages.push(Message::tool_result(tool_use_id, &content));
+        self.messages
+            .push(Message::tool_result(tool_use_id, &content));
         self.updated_at = Utc::now();
     }
 
@@ -84,7 +87,10 @@ impl SessionStore {
 
     pub async fn get_or_load(&mut self, id: &str) -> &mut Session {
         if !self.sessions.contains_key(id) {
-            let session = self.load_from_disk(id).await.unwrap_or_else(|_| Session::new(id));
+            let session = self
+                .load_from_disk(id)
+                .await
+                .unwrap_or_else(|_| Session::new(id));
             self.sessions.insert(id.to_string(), session);
         }
         self.sessions
@@ -100,19 +106,20 @@ impl SessionStore {
             let content: String = session
                 .messages
                 .iter()
-                .filter_map(|m| {
-                    match serde_json::to_string(m) {
-                        Ok(json) => Some(json),
-                        Err(e) => {
-                            tracing::error!("Failed to serialize message in session {id}: {e}");
-                            None
-                        }
+                .filter_map(|m| match serde_json::to_string(m) {
+                    Ok(json) => Some(json),
+                    Err(e) => {
+                        tracing::error!("Failed to serialize message in session {id}: {e}");
+                        None
                     }
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
             tokio::fs::write(&path, content).await?;
-            tracing::debug!("Persisted session {id} ({} messages)", session.messages.len());
+            tracing::debug!(
+                "Persisted session {id} ({} messages)",
+                session.messages.len()
+            );
         }
         Ok(())
     }
@@ -167,7 +174,10 @@ impl SessionStore {
                 if let Err(e) = tokio::fs::remove_file(&path).await {
                     tracing::warn!("Failed to remove expired session {session_id}: {e}");
                 } else {
-                    tracing::info!("Removed expired session {session_id} (age: {}d)", age.as_secs() / 86400);
+                    tracing::info!(
+                        "Removed expired session {session_id} (age: {}d)",
+                        age.as_secs() / 86400
+                    );
                     self.sessions.remove(&session_id);
                     removed += 1;
                 }
@@ -185,7 +195,9 @@ impl SessionStore {
                 if let Err(e) = tokio::fs::remove_file(&path).await {
                     tracing::warn!("Failed to remove excess session {session_id}: {e}");
                 } else {
-                    tracing::info!("Removed excess session {session_id} (over max count {max_count})");
+                    tracing::info!(
+                        "Removed excess session {session_id} (over max count {max_count})"
+                    );
                     self.sessions.remove(&session_id);
                     removed += 1;
                 }
@@ -193,7 +205,10 @@ impl SessionStore {
         }
 
         if removed > 0 {
-            tracing::info!("Session cleanup: removed {removed} session(s), {} remaining", kept.len());
+            tracing::info!(
+                "Session cleanup: removed {removed} session(s), {} remaining",
+                kept.len()
+            );
         }
 
         Ok(removed)
@@ -205,13 +220,11 @@ impl SessionStore {
         let messages: Vec<Message> = content
             .lines()
             .filter(|line| !line.trim().is_empty())
-            .filter_map(|line| {
-                match serde_json::from_str(line) {
-                    Ok(msg) => Some(msg),
-                    Err(e) => {
-                        tracing::warn!("Skipping malformed message in session {id}: {e}");
-                        None
-                    }
+            .filter_map(|line| match serde_json::from_str(line) {
+                Ok(msg) => Some(msg),
+                Err(e) => {
+                    tracing::warn!("Skipping malformed message in session {id}: {e}");
+                    None
                 }
             })
             .collect();
@@ -332,7 +345,9 @@ impl MemoryManager {
                     if !summary_text.trim().is_empty() {
                         // Append summary to MEMORY.md
                         let memory_path = self.data_dir.join("memory/MEMORY.md");
-                        let mut memory = tokio::fs::read_to_string(&memory_path).await.unwrap_or_default();
+                        let mut memory = tokio::fs::read_to_string(&memory_path)
+                            .await
+                            .unwrap_or_default();
                         let date = chrono::Local::now().format("%Y-%m-%d %H:%M");
                         memory.push_str(&format!("\n\n### Consolidated {date}\n\n{summary_text}"));
 
@@ -343,7 +358,9 @@ impl MemoryManager {
                                 memory.len(),
                                 memory_max_bytes
                             );
-                            memory = self.reconsolidate_memory(&memory, llm, memory_max_bytes).await;
+                            memory = self
+                                .reconsolidate_memory(&memory, llm, memory_max_bytes)
+                                .await;
                         }
 
                         tokio::fs::write(&memory_path, memory).await?;
@@ -483,13 +500,18 @@ mod tests {
         }
         assert_eq!(session.message_count(), 10);
 
-        mgr.consolidate(&mut session, &mock_llm, 8192).await.unwrap();
+        mgr.consolidate(&mut session, &mock_llm, 8192)
+            .await
+            .unwrap();
 
         // Session should have only the recent half
         // Session should have roughly half the messages (exact count depends on
         // clean split point finding a User message boundary)
-        assert!(session.message_count() >= 4 && session.message_count() <= 7,
-            "Expected 4-7 messages after consolidation, got {}", session.message_count());
+        assert!(
+            session.message_count() >= 4 && session.message_count() <= 7,
+            "Expected 4-7 messages after consolidation, got {}",
+            session.message_count()
+        );
         // First remaining message should be a User message (clean split)
         assert!(matches!(session.messages[0].role, Role::User));
         // MEMORY.md should contain the summary
@@ -512,7 +534,9 @@ mod tests {
         session.add_message(Role::User, "Hi");
         session.add_message(Role::Assistant, "Hello");
 
-        mgr.consolidate(&mut session, &mock_llm, 8192).await.unwrap();
+        mgr.consolidate(&mut session, &mock_llm, 8192)
+            .await
+            .unwrap();
 
         // Should not consolidate — too few messages
         assert_eq!(session.message_count(), 2);
@@ -563,7 +587,9 @@ mod tests {
             session.add_message(Role::Assistant, &format!("Reply {i}"));
         }
 
-        mgr.consolidate(&mut session, &mock_llm, 8192).await.unwrap();
+        mgr.consolidate(&mut session, &mock_llm, 8192)
+            .await
+            .unwrap();
         assert!(!session.needs_consolidation);
     }
 
@@ -587,7 +613,9 @@ mod tests {
                 arguments: serde_json::json!({}),
             }],
         ));
-        session.messages.push(Message::tool_result("call_1", "3:42 PM"));
+        session
+            .messages
+            .push(Message::tool_result("call_1", "3:42 PM"));
         session.add_message(Role::Assistant, "It's 3:42 PM.");
         // Add more messages to trigger consolidation
         for i in 0..8 {
@@ -595,7 +623,9 @@ mod tests {
             session.add_message(Role::Assistant, &format!("Answer {i}"));
         }
 
-        mgr.consolidate(&mut session, &mock_llm, 8192).await.unwrap();
+        mgr.consolidate(&mut session, &mock_llm, 8192)
+            .await
+            .unwrap();
 
         // Verify no orphaned tool messages at the start
         if !session.messages.is_empty() {
@@ -627,16 +657,21 @@ mod tests {
     #[test]
     fn test_find_clean_split_point() {
         let messages = vec![
-            Message::user("Q1"),                    // 0
-            Message::assistant("A1"),               // 1
-            Message::user("Q2"),                    // 2
-            Message::assistant_tool_use(None, vec![ToolCall {
-                id: "c1".into(), name: "t".into(), arguments: serde_json::json!({}),
-            }]),                                     // 3
-            Message::tool_result("c1", "result"),   // 4
-            Message::assistant("A2"),               // 5
-            Message::user("Q3"),                    // 6
-            Message::assistant("A3"),               // 7
+            Message::user("Q1"),      // 0
+            Message::assistant("A1"), // 1
+            Message::user("Q2"),      // 2
+            Message::assistant_tool_use(
+                None,
+                vec![ToolCall {
+                    id: "c1".into(),
+                    name: "t".into(),
+                    arguments: serde_json::json!({}),
+                }],
+            ), // 3
+            Message::tool_result("c1", "result"), // 4
+            Message::assistant("A2"), // 5
+            Message::user("Q3"),      // 6
+            Message::assistant("A3"), // 7
         ];
 
         // If desired split is at index 4 (tool result), should back up to index 2 (user)
@@ -708,7 +743,9 @@ mod tests {
         let mgr = MemoryManager::new(dir.path().to_path_buf());
 
         mgr.append_daily_note("User prefers Celsius").await.unwrap();
-        mgr.append_daily_note("Created morning cron job").await.unwrap();
+        mgr.append_daily_note("Created morning cron job")
+            .await
+            .unwrap();
 
         let date = chrono::Local::now().format("%Y-%m-%d");
         let path = dir.path().join(format!("memory/{date}.md"));
@@ -727,10 +764,18 @@ mod tests {
 
         // Create 5 session files with staggered mtimes (all recent, within 1 day)
         let now_secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
         for i in 0..5 {
             let path = sessions_dir.join(format!("session-{i}.jsonl"));
-            std::fs::write(&path, format!("{{\"role\":\"user\",\"content\":{{\"type\":\"text\",\"text\":\"msg {i}\"}}}}")).unwrap();
+            std::fs::write(
+                &path,
+                format!(
+                    "{{\"role\":\"user\",\"content\":{{\"type\":\"text\",\"text\":\"msg {i}\"}}}}"
+                ),
+            )
+            .unwrap();
             // Stagger mtimes: session-0 is oldest, session-4 is newest
             let mtime = filetime::FileTime::from_unix_time(now_secs - 3600 + i as i64 * 100, 0);
             filetime::set_file_mtime(&path, mtime).unwrap();
@@ -765,8 +810,10 @@ mod tests {
         // Create 2 "old" sessions (mtime 60 days ago) and 1 "new" session (now)
         let old_time = filetime::FileTime::from_unix_time(
             std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH).unwrap()
-                .as_secs() as i64 - 60 * 86400,
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64
+                - 60 * 86400,
             0,
         );
         for name in &["old-1", "old-2"] {

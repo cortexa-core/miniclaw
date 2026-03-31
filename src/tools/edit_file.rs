@@ -8,7 +8,9 @@ pub struct EditFileTool;
 
 #[async_trait]
 impl Tool for EditFileTool {
-    fn name(&self) -> &str { "edit_file" }
+    fn name(&self) -> &str {
+        "edit_file"
+    }
 
     fn description(&self) -> &str {
         "Edit a file by replacing a specific text string with new text. \

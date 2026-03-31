@@ -9,7 +9,9 @@ pub struct ShellExecTool;
 
 #[async_trait]
 impl Tool for ShellExecTool {
-    fn name(&self) -> &str { "shell_exec" }
+    fn name(&self) -> &str {
+        "shell_exec"
+    }
 
     fn description(&self) -> &str {
         "Execute a shell command on the device. Commands are sandboxed: \
@@ -39,8 +41,7 @@ impl Tool for ShellExecTool {
         // Pipes (|) are allowed — they're useful for data flow (sort, head, grep).
         // Redirects (>, <) are blocked to prevent file overwrites.
         const DANGEROUS_CHARS: &[char] = &[
-            ';', '&', '`', '$', '(', ')', '{', '}', '<', '>',
-            '\n', '\r', '\0',
+            ';', '&', '`', '$', '(', ')', '{', '}', '<', '>', '\n', '\r', '\0',
         ];
         if command.chars().any(|c| DANGEROUS_CHARS.contains(&c)) {
             return ToolResult::Error(
@@ -133,7 +134,10 @@ impl Tool for ShellExecTool {
                 }
             }
             Ok(Err(e)) => ToolResult::Error(format!("Failed to execute command: {e}")),
-            Err(_) => ToolResult::Error(format!("Command timed out after {}s", timeout_duration.as_secs())),
+            Err(_) => ToolResult::Error(format!(
+                "Command timed out after {}s",
+                timeout_duration.as_secs()
+            )),
         }
     }
 }
@@ -141,8 +145,8 @@ impl Tool for ShellExecTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use crate::config::Config;
+    use std::sync::Arc;
 
     fn test_ctx(dir: &std::path::Path) -> ToolContext {
         let config: Config = toml::from_str(

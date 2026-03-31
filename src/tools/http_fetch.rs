@@ -8,7 +8,9 @@ pub struct HttpFetchTool;
 
 #[async_trait]
 impl Tool for HttpFetchTool {
-    fn name(&self) -> &str { "http_fetch" }
+    fn name(&self) -> &str {
+        "http_fetch"
+    }
 
     fn description(&self) -> &str {
         "Fetch content from a URL. Returns the response body as text. \
@@ -47,9 +49,7 @@ impl Tool for HttpFetchTool {
         let method = args["method"].as_str().unwrap_or("GET");
         let timeout = Duration::from_secs(ctx.config.tools.http_fetch_timeout_secs);
 
-        let client = reqwest::Client::builder()
-            .timeout(timeout)
-            .build();
+        let client = reqwest::Client::builder().timeout(timeout).build();
 
         let client = match client {
             Ok(c) => c,
@@ -75,7 +75,11 @@ impl Tool for HttpFetchTool {
                     while end > 0 && !body.is_char_boundary(end) {
                         end -= 1;
                     }
-                    format!("{}...\n(truncated, total {} bytes)", &body[..end], body.len())
+                    format!(
+                        "{}...\n(truncated, total {} bytes)",
+                        &body[..end],
+                        body.len()
+                    )
                 } else {
                     body
                 };
