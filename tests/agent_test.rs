@@ -122,9 +122,6 @@ impl MockLlmClient {
         }
     }
 
-    fn context_count(&self) -> usize {
-        self.recorded_contexts.lock().unwrap().len()
-    }
 }
 
 #[async_trait]
@@ -339,14 +336,6 @@ async fn test_context_includes_soul() {
     std::fs::create_dir_all(dir.path().join("skills")).unwrap();
     std::fs::write(dir.path().join("SOUL.md"), "# TestBot\nYou are a test bot.").unwrap();
 
-    let mock = MockLlmClient::text("Hello!");
-    let recorded = &mock as *const MockLlmClient;
-
-    let mut registry = ToolRegistry::new();
-    tools::register_default_tools(&mut registry);
-
-    // We need to check what context was sent to the LLM
-    // Since we can't easily inspect after move, check context_count
     let mut agent = make_agent(MockLlmClient::text("Hello!"), dir.path());
     agent.process(&test_input("Hi")).await.unwrap();
 
