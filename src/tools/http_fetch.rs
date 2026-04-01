@@ -106,15 +106,41 @@ impl Tool for HttpFetchTool {
 
 /// Scan response body for any known secrets and redact them.
 /// This implements the credential boundary injection pattern from IronClaw.
-fn redact_known_secrets(text: &str, _ctx: &ToolContext) -> String {
+fn redact_known_secrets(text: &str, ctx: &ToolContext) -> String {
     let mut result = text.to_string();
 
-    // Check all known API keys from env vars
-    for env_name in &["ANTHROPIC_API_KEY", "OPENAI_API_KEY"] {
+    let mut env_names: Vec<&str> = vec![];
+
+    if !ctx.config.llm.api_key_env.is_empty() {
+        env_names.push(&ctx.config.llm.api_key_env);
+    }
+    if let Some(ref fallback) = ctx.config.llm.fallback {
+        if !fallback.api_key_env.is_empty() {
+            env_names.push(&fallback.api_key_env);
+        }
+    }
+    if let Some(ref server) = ctx.config.server {
+        if !server.api_token_env.is_empty() {
+            env_names.push(&server.api_token_env);
+        }
+    }
+    if let Some(ref tg) = ctx.config.channels.telegram {
+        if !tg.bot_token_env.is_empty() {
+            env_names.push(&tg.bot_token_env);
+        }
+    }
+
+    env_names.push("ANTHROPIC_API_KEY");
+    env_names.push("OPENAI_API_KEY");
+
+    env_names.sort_unstable();
+    env_names.dedup();
+
+    for env_name in &env_names {
         if let Ok(key) = std::env::var(env_name) {
             if !key.is_empty() && result.contains(&key) {
                 result = result.replace(&key, "[REDACTED]");
-                tracing::warn!("Redacted leaked credential ({env_name}) from HTTP response");
+                tracing::warn!("Redacted leaked credential from HTTP response");
             }
         }
     }
