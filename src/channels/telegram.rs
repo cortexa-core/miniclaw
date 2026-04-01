@@ -1,7 +1,9 @@
+use std::sync::Arc;
+
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use teloxide::prelude::*;
-use teloxide::types::{ChatAction, ParseMode};
+use teloxide::types::ChatAction;
 use tokio::sync::oneshot;
 
 use super::{AgentSender, Channel};
@@ -55,15 +57,22 @@ impl Channel for TelegramChannel {
             me.first_name
         );
 
-        let allowed_users = self.allowed_users.clone();
-        let respond_in_groups = self.respond_in_groups.clone();
-        let bot_username = me.username.clone().unwrap_or_default();
+        let allowed_users = Arc::new(self.allowed_users.clone());
+        let respond_in_groups = Arc::new(self.respond_in_groups.clone());
+        let bot_username = Arc::new(me.username.clone().unwrap_or_default());
+
+        loop {
+        let bot = bot.clone();
+        let agent_tx = agent_tx.clone();
+        let allowed_users = Arc::clone(&allowed_users);
+        let respond_in_groups = Arc::clone(&respond_in_groups);
+        let bot_username = Arc::clone(&bot_username);
 
         teloxide::repl(bot, move |bot: Bot, msg: Message| {
             let agent_tx = agent_tx.clone();
-            let allowed_users = allowed_users.clone();
-            let respond_in_groups = respond_in_groups.clone();
-            let bot_username = bot_username.clone();
+            let allowed_users = Arc::clone(&allowed_users);
+            let respond_in_groups = Arc::clone(&respond_in_groups);
+            let bot_username = Arc::clone(&bot_username);
 
             async move {
                 // Only handle text messages
@@ -92,7 +101,11 @@ impl Channel for TelegramChannel {
                             let is_reply_to_bot = msg
                                 .reply_to_message()
                                 .and_then(|r| r.from.as_ref())
-                                .map(|u| u.is_bot)
+                                .map(|u| {
+                                    u.is_bot
+                                        && u.username.as_deref()
+                                            == Some(bot_username.as_str())
+                                })
                                 .unwrap_or(false);
                             mentioned || is_reply_to_bot
                         }
@@ -147,16 +160,12 @@ impl Channel for TelegramChannel {
                     };
 
                 // Chunk and send (Telegram max 4096 chars)
-                for chunk in chunk_message(&response, 4096) {
-                    // Try Markdown first, fall back to plain text
-                    let result = bot
-                        .send_message(msg.chat.id, &chunk)
-                        .parse_mode(ParseMode::MarkdownV2)
-                        .await;
-
-                    if result.is_err() {
-                        bot.send_message(msg.chat.id, &chunk).await.ok();
+                let chunks = chunk_message(&response, 4096);
+                for (i, chunk) in chunks.iter().enumerate() {
+                    if i > 0 {
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                     }
+                    bot.send_message(msg.chat.id, chunk).await.ok();
                 }
 
                 Ok(())
@@ -164,7 +173,9 @@ impl Channel for TelegramChannel {
         })
         .await;
 
-        Ok(())
+        tracing::warn!("Telegram polling ended, reconnecting in 5s...");
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        } // end reconnection loop
     }
 }
 
