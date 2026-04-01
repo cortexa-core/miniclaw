@@ -37,10 +37,19 @@ pub async fn post_config(
         );
     }
 
-    if let Err(e) = tokio::fs::write(&state.config_path, &toml_str).await {
+    // Atomic write: write to temp file, then rename (POSIX rename is atomic)
+    let tmp_path = state.config_path.with_extension("tmp");
+    if let Err(e) = tokio::fs::write(&tmp_path, &toml_str).await {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": format!("Failed to write config: {e}")})),
+        );
+    }
+    if let Err(e) = tokio::fs::rename(&tmp_path, &state.config_path).await {
+        tokio::fs::remove_file(&tmp_path).await.ok();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Failed to apply config: {e}")})),
         );
     }
 
