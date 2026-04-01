@@ -86,7 +86,7 @@ fn validate_session_id(id: &str) -> Result<()> {
 }
 
 impl Agent {
-    pub fn new(
+    pub async fn new(
         llm: Box<dyn LlmProvider>,
         fallback_llm: Option<Box<dyn LlmProvider>>,
         tool_registry: ToolRegistry,
@@ -109,7 +109,7 @@ impl Agent {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        context_builder.set_available_tools(tool_names);
+        context_builder.set_available_tools(tool_names).await;
 
         Self {
             llm,

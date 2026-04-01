@@ -147,7 +147,8 @@ async fn create_agent(config: &Config, data_dir: &Path) -> Result<Agent> {
         tool_registry,
         config,
         data_dir.to_path_buf(),
-    );
+    )
+    .await;
 
     // Run session GC at startup — remove expired and excess session files
     if let Err(e) = agent.cleanup_sessions().await {

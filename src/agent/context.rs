@@ -74,9 +74,9 @@ impl ContextBuilder {
     }
 
     /// Set available tool names for skill gating
-    pub fn set_available_tools(&mut self, tool_names: Vec<String>) {
+    pub async fn set_available_tools(&mut self, tool_names: Vec<String>) {
         let skills_dir = self.data_dir.join("skills");
-        self.skill_manager = Some(SkillManager::load(&skills_dir, &tool_names));
+        self.skill_manager = Some(SkillManager::load(&skills_dir, &tool_names).await);
     }
 
     pub async fn build(

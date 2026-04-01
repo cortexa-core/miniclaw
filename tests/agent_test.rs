@@ -163,7 +163,7 @@ fn test_input(msg: &str) -> Input {
     }
 }
 
-fn make_agent(mock: MockLlmClient, data_dir: &std::path::Path) -> Agent {
+async fn make_agent(mock: MockLlmClient, data_dir: &std::path::Path) -> Agent {
     std::fs::create_dir_all(data_dir.join("memory")).unwrap();
     std::fs::create_dir_all(data_dir.join("sessions")).unwrap();
     std::fs::create_dir_all(data_dir.join("skills")).unwrap();
@@ -178,6 +178,7 @@ fn make_agent(mock: MockLlmClient, data_dir: &std::path::Path) -> Agent {
         &test_config(),
         data_dir.to_path_buf(),
     )
+    .await
 }
 
 // --- Tests ---
@@ -185,7 +186,7 @@ fn make_agent(mock: MockLlmClient, data_dir: &std::path::Path) -> Agent {
 #[tokio::test]
 async fn test_simple_text_response() {
     let dir = tempfile::tempdir().unwrap();
-    let mut agent = make_agent(MockLlmClient::text("Hello there!"), dir.path());
+    let mut agent = make_agent(MockLlmClient::text("Hello there!"), dir.path()).await;
 
     let output = agent.process(&test_input("Hi")).await.unwrap();
     assert_eq!(output.content, "Hello there!");
@@ -197,7 +198,8 @@ async fn test_single_tool_call() {
     let mut agent = make_agent(
         MockLlmClient::tool_then_text("get_time", json!({}), "It's 3:42 PM."),
         dir.path(),
-    );
+    )
+    .await;
 
     let output = agent
         .process(&test_input("What time is it?"))
@@ -213,7 +215,7 @@ async fn test_multi_tool_parallel() {
         vec![("get_time", json!({})), ("system_info", json!({}))],
         "Time is 3:42 PM and system is healthy.",
     );
-    let mut agent = make_agent(mock, dir.path());
+    let mut agent = make_agent(mock, dir.path()).await;
 
     let output = agent
         .process(&test_input("Time and system info please"))
@@ -226,7 +228,7 @@ async fn test_multi_tool_parallel() {
 async fn test_max_iterations() {
     let dir = tempfile::tempdir().unwrap();
     let mock = MockLlmClient::infinite_tool_calls("get_time", json!({}));
-    let mut agent = make_agent(mock, dir.path());
+    let mut agent = make_agent(mock, dir.path()).await;
 
     let output = agent.process(&test_input("Loop forever")).await.unwrap();
     assert!(output.content.contains("reasoning limit"));
@@ -251,7 +253,8 @@ async fn test_llm_failover() {
         registry,
         &test_config(),
         dir.path().to_path_buf(),
-    );
+    )
+    .await;
 
     let output = agent.process(&test_input("Hello")).await.unwrap();
     assert_eq!(output.content, "Fallback response!");
@@ -276,7 +279,8 @@ async fn test_llm_all_fail() {
         registry,
         &test_config(),
         dir.path().to_path_buf(),
-    );
+    )
+    .await;
 
     let result = agent.process(&test_input("Hello")).await;
     assert!(result.is_err());
@@ -289,7 +293,7 @@ async fn test_llm_all_fail() {
 #[tokio::test]
 async fn test_session_persistence() {
     let dir = tempfile::tempdir().unwrap();
-    let mut agent = make_agent(MockLlmClient::text("Hi!"), dir.path());
+    let mut agent = make_agent(MockLlmClient::text("Hi!"), dir.path()).await;
 
     agent.process(&test_input("Hello")).await.unwrap();
 
@@ -308,14 +312,14 @@ async fn test_multi_turn() {
 
     // First turn
     {
-        let mut agent = make_agent(MockLlmClient::text("Hi!"), dir.path());
+        let mut agent = make_agent(MockLlmClient::text("Hi!"), dir.path()).await;
         agent.process(&test_input("Hello")).await.unwrap();
         agent.session_store.persist_all().await.unwrap();
     }
 
     // Second turn — loads existing session
     {
-        let mut agent = make_agent(MockLlmClient::text("I remember you!"), dir.path());
+        let mut agent = make_agent(MockLlmClient::text("I remember you!"), dir.path()).await;
         let output = agent.process(&test_input("Remember me?")).await.unwrap();
         assert_eq!(output.content, "I remember you!");
 
@@ -335,7 +339,7 @@ async fn test_context_includes_soul() {
     std::fs::create_dir_all(dir.path().join("skills")).unwrap();
     std::fs::write(dir.path().join("SOUL.md"), "# TestBot\nYou are a test bot.").unwrap();
 
-    let mut agent = make_agent(MockLlmClient::text("Hello!"), dir.path());
+    let mut agent = make_agent(MockLlmClient::text("Hello!"), dir.path()).await;
     agent.process(&test_input("Hi")).await.unwrap();
 
     // Verify SOUL.md was created (default or custom)
@@ -352,7 +356,7 @@ async fn test_file_tool_via_agent() {
         json!({"path": "test.txt", "content": "hello world"}),
         "File written!",
     );
-    let mut agent = make_agent(mock, dir.path());
+    let mut agent = make_agent(mock, dir.path()).await;
     let output = agent
         .process(&test_input("Write hello to test.txt"))
         .await
@@ -371,7 +375,7 @@ async fn test_unknown_tool() {
     let dir = tempfile::tempdir().unwrap();
     let mock =
         MockLlmClient::tool_then_text("nonexistent_tool", json!({}), "Sorry, that didn't work.");
-    let mut agent = make_agent(mock, dir.path());
+    let mut agent = make_agent(mock, dir.path()).await;
 
     // Should not crash — agent handles unknown tool gracefully
     let output = agent

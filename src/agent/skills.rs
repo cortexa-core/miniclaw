@@ -41,21 +41,21 @@ pub struct SkillManager {
 
 impl SkillManager {
     /// Load skills from directory, filter by tool/env requirements
-    pub fn load(skills_dir: &Path, available_tools: &[String]) -> Self {
+    pub async fn load(skills_dir: &Path, available_tools: &[String]) -> Self {
         let mut skills = Vec::new();
 
-        let entries = match std::fs::read_dir(skills_dir) {
+        let mut entries = match tokio::fs::read_dir(skills_dir).await {
             Ok(e) => e,
             Err(_) => return Self { skills },
         };
 
-        for entry in entries.flatten() {
+        while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
             if path.extension().is_none_or(|ext| ext != "md") {
                 continue;
             }
 
-            match Self::load_skill(&path, available_tools) {
+            match Self::load_skill(&path, available_tools).await {
                 Ok(Some(skill)) => {
                     tracing::info!("Loaded skill: {}", skill.name);
                     skills.push(skill);
@@ -112,8 +112,8 @@ impl SkillManager {
             .collect()
     }
 
-    fn load_skill(path: &Path, available_tools: &[String]) -> anyhow::Result<Option<Skill>> {
-        let raw = std::fs::read_to_string(path)?;
+    async fn load_skill(path: &Path, available_tools: &[String]) -> anyhow::Result<Option<Skill>> {
+        let raw = tokio::fs::read_to_string(path).await?;
         let (frontmatter, body) = Self::parse_frontmatter(&raw)?;
         let meta: SkillFrontmatter = parse_yaml_frontmatter(&frontmatter)?;
 
@@ -254,8 +254,8 @@ mod tests {
         assert_eq!(parsed.requires.env, vec!["HUE_IP"]);
     }
 
-    #[test]
-    fn test_load_and_gate_by_tools() {
+    #[tokio::test]
+    async fn test_load_and_gate_by_tools() {
         let dir = tempfile::tempdir().unwrap();
 
         std::fs::write(
@@ -267,22 +267,22 @@ mod tests {
         std::fs::write(dir.path().join("gated.md"),
             "---\nname: gated\ndescription: Needs special\nrequires:\n  tools: [nonexistent]\n---\n\nWon't load.").unwrap();
 
-        let mgr = SkillManager::load(dir.path(), &["get_time".into()]);
+        let mgr = SkillManager::load(dir.path(), &["get_time".into()]).await;
         assert_eq!(mgr.skills.len(), 1);
         assert_eq!(mgr.skills[0].name, "valid");
     }
 
-    #[test]
-    fn test_load_and_gate_by_env() {
+    #[tokio::test]
+    async fn test_load_and_gate_by_env() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("env.md"),
             "---\nname: env-skill\ndescription: Needs env\nrequires:\n  env: [UNICLAW_TEST_98765]\n---\n\nContent.").unwrap();
 
-        let mgr = SkillManager::load(dir.path(), &[]);
+        let mgr = SkillManager::load(dir.path(), &[]).await;
         assert_eq!(mgr.skills.len(), 0);
 
         std::env::set_var("UNICLAW_TEST_98765", "1");
-        let mgr = SkillManager::load(dir.path(), &[]);
+        let mgr = SkillManager::load(dir.path(), &[]).await;
         assert_eq!(mgr.skills.len(), 1);
         std::env::remove_var("UNICLAW_TEST_98765");
     }
@@ -314,15 +314,15 @@ mod tests {
         assert!(mgr.prompt_content().is_empty());
     }
 
-    #[test]
-    fn test_empty_body_skipped() {
+    #[tokio::test]
+    async fn test_empty_body_skipped() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("empty.md"),
             "---\nname: empty\ndescription: No body\n---\n\n",
         )
         .unwrap();
-        let mgr = SkillManager::load(dir.path(), &[]);
+        let mgr = SkillManager::load(dir.path(), &[]).await;
         assert_eq!(mgr.skills.len(), 0);
     }
 }
