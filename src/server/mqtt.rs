@@ -30,6 +30,16 @@ pub async fn mqtt_task(
         .as_ref()
         .map(|s| s.mqtt_device_id.as_str())
         .unwrap_or("uniclaw-01");
+
+    if !device_id
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(anyhow::anyhow!(
+            "mqtt_device_id contains invalid characters (only alphanumeric, hyphens, underscores allowed): '{device_id}'"
+        ));
+    }
+
     let broker = config
         .server
         .as_ref()
