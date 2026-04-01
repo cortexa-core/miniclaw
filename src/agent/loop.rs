@@ -116,7 +116,7 @@ impl Agent {
             fallback_llm,
             tool_registry,
             memory: MemoryManager::new(data_dir.clone()),
-            session_store: SessionStore::new(data_dir.clone()),
+            session_store: SessionStore::new(data_dir.clone(), config.agent.session_max_count),
             context_builder,
             config: agent_config,
             full_config: Arc::new(config.clone()),

@@ -74,18 +74,27 @@ impl Session {
 
 pub struct SessionStore {
     sessions: HashMap<String, Session>,
+    access_order: HashMap<String, u64>,
+    access_counter: u64,
+    max_cached: usize,
     data_dir: PathBuf,
 }
 
 impl SessionStore {
-    pub fn new(data_dir: PathBuf) -> Self {
+    pub fn new(data_dir: PathBuf, max_cached: usize) -> Self {
         Self {
             sessions: HashMap::new(),
+            access_order: HashMap::new(),
+            access_counter: 0,
+            max_cached,
             data_dir,
         }
     }
 
     pub async fn get_or_load(&mut self, id: &str) -> &mut Session {
+        if !self.sessions.contains_key(id) && self.sessions.len() >= self.max_cached {
+            self.evict_lru().await;
+        }
         if !self.sessions.contains_key(id) {
             let session = self
                 .load_from_disk(id)
@@ -93,9 +102,27 @@ impl SessionStore {
                 .unwrap_or_else(|_| Session::new(id));
             self.sessions.insert(id.to_string(), session);
         }
+        self.access_counter += 1;
+        self.access_order.insert(id.to_string(), self.access_counter);
         self.sessions
             .get_mut(id)
             .expect("session was just inserted; this is a bug if it fails")
+    }
+
+    async fn evict_lru(&mut self) {
+        if let Some((lru_id, _)) = self
+            .access_order
+            .iter()
+            .min_by_key(|(_, &order)| order)
+            .map(|(id, order)| (id.clone(), *order))
+        {
+            if let Err(e) = self.persist(&lru_id).await {
+                tracing::warn!("Failed to persist evicted session {lru_id}: {e}");
+            }
+            self.sessions.remove(&lru_id);
+            self.access_order.remove(&lru_id);
+            tracing::debug!("Evicted session {lru_id} from cache");
+        }
     }
 
     pub async fn persist(&self, id: &str) -> Result<()> {
@@ -703,7 +730,7 @@ mod tests {
     async fn test_session_roundtrip_jsonl() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("sessions")).unwrap();
-        let mut store = SessionStore::new(dir.path().to_path_buf());
+        let mut store = SessionStore::new(dir.path().to_path_buf(), 100);
 
         // Create and populate session
         {
@@ -714,7 +741,7 @@ mod tests {
         store.persist("abc").await.unwrap();
 
         // Load from fresh store
-        let mut store2 = SessionStore::new(dir.path().to_path_buf());
+        let mut store2 = SessionStore::new(dir.path().to_path_buf(), 100);
         let session2 = store2.get_or_load("abc").await;
         assert_eq!(session2.message_count(), 2);
         assert_eq!(session2.messages[0].content_text(), "Hello");
@@ -723,7 +750,7 @@ mod tests {
     #[tokio::test]
     async fn test_session_store_creates_new() {
         let dir = tempfile::tempdir().unwrap();
-        let mut store = SessionStore::new(dir.path().to_path_buf());
+        let mut store = SessionStore::new(dir.path().to_path_buf(), 100);
         let session = store.get_or_load("new-session").await;
         assert_eq!(session.id, "new-session");
         assert_eq!(session.message_count(), 0);
@@ -788,7 +815,7 @@ mod tests {
             filetime::set_file_mtime(&path, mtime).unwrap();
         }
 
-        let mut store = SessionStore::new(dir.path().to_path_buf());
+        let mut store = SessionStore::new(dir.path().to_path_buf(), 100);
         // Also load one into memory to verify eviction
         store.get_or_load("session-0").await;
         assert!(store.sessions.contains_key("session-0"));
@@ -830,7 +857,7 @@ mod tests {
         }
         std::fs::write(sessions_dir.join("new-1.jsonl"), "{}").unwrap();
 
-        let mut store = SessionStore::new(dir.path().to_path_buf());
+        let mut store = SessionStore::new(dir.path().to_path_buf(), 100);
         // max_age_days=30, max_count=100 — should remove the 2 old ones
         let removed = store.cleanup_sessions(30, 100).await.unwrap();
         assert_eq!(removed, 2);
@@ -843,7 +870,7 @@ mod tests {
     async fn test_cleanup_no_sessions_dir() {
         let dir = tempfile::tempdir().unwrap();
         // No sessions/ directory at all — should not error
-        let mut store = SessionStore::new(dir.path().to_path_buf());
+        let mut store = SessionStore::new(dir.path().to_path_buf(), 100);
         let removed = store.cleanup_sessions(30, 100).await.unwrap();
         assert_eq!(removed, 0);
     }
@@ -858,10 +885,39 @@ mod tests {
         std::fs::write(sessions_dir.join("a.jsonl"), "{}").unwrap();
         std::fs::write(sessions_dir.join("b.jsonl"), "{}").unwrap();
 
-        let mut store = SessionStore::new(dir.path().to_path_buf());
+        let mut store = SessionStore::new(dir.path().to_path_buf(), 100);
         let removed = store.cleanup_sessions(30, 100).await.unwrap();
         assert_eq!(removed, 0);
         assert!(sessions_dir.join("a.jsonl").exists());
         assert!(sessions_dir.join("b.jsonl").exists());
+    }
+
+    #[tokio::test]
+    async fn test_session_cache_eviction() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("sessions")).unwrap();
+        let mut store = SessionStore::new(dir.path().to_path_buf(), 2);
+
+        {
+            let s = store.get_or_load("a").await;
+            s.add_message(Role::User, "hello from a");
+        }
+        {
+            let s = store.get_or_load("b").await;
+            s.add_message(Role::User, "hello from b");
+        }
+        assert_eq!(store.sessions.len(), 2);
+
+        {
+            let s = store.get_or_load("c").await;
+            s.add_message(Role::User, "hello from c");
+        }
+        assert_eq!(store.sessions.len(), 2);
+        assert!(!store.sessions.contains_key("a"));
+        assert!(store.sessions.contains_key("b"));
+        assert!(store.sessions.contains_key("c"));
+
+        // "a" was persisted to disk before eviction
+        assert!(dir.path().join("sessions/a.jsonl").exists());
     }
 }
