@@ -150,7 +150,9 @@ impl Agent {
                     input.session_id
                 );
                 // Best-effort persist before returning timeout
-                self.session_store.persist(&input.session_id).await.ok();
+                if let Err(e) = self.session_store.persist(&input.session_id).await {
+                    tracing::warn!("Failed to persist session {}: {e}", input.session_id);
+                }
                 Ok(Output::text("Request timed out.".to_string()))
             }
         }
@@ -172,7 +174,9 @@ impl Agent {
                 tracing::warn!("Consolidation failed: {e}");
             } else {
                 // Persist the consolidated session so changes survive a crash
-                self.session_store.persist(&input.session_id).await.ok();
+                if let Err(e) = self.session_store.persist(&input.session_id).await {
+                    tracing::warn!("Failed to persist session {}: {e}", input.session_id);
+                }
             }
         }
 
