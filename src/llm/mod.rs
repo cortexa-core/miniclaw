@@ -1,5 +1,6 @@
 pub mod aliases;
 pub mod anthropic;
+pub mod gemini;
 pub mod openai;
 pub mod types;
 
@@ -25,8 +26,9 @@ pub fn create_provider(config: &LlmConfig) -> Result<Box<dyn LlmProvider>> {
     match config.provider.as_str() {
         "anthropic" => Ok(Box::new(anthropic::AnthropicProvider::new(config)?)),
         "openai_compatible" | "openai" => Ok(Box::new(openai::OpenAiProvider::new(config)?)),
+        "gemini" => Ok(Box::new(gemini::GeminiProvider::new(config)?)),
         other => Err(anyhow!(
-            "Unknown LLM provider: {other}. Use 'anthropic' or 'openai_compatible'."
+            "Unknown LLM provider: {other}. Use 'anthropic', 'gemini', or 'openai_compatible'."
         )),
     }
 }
