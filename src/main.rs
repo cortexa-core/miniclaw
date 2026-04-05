@@ -206,13 +206,37 @@ fn spawn_agent_worker(mut agent: Agent) -> mpsc::Sender<(Input, oneshot::Sender<
 
     tokio::spawn(async move {
         while let Some((input, reply_tx)) = inbound_rx.recv().await {
+            let session_id = input.session_id.clone();
+            let start = std::time::Instant::now();
+
+            tracing::info!(session = %session_id, "Processing request");
+
             let result = agent.process(&input).await;
+            let elapsed_ms = start.elapsed().as_millis() as u64;
+
             match result {
                 Ok(output) => {
+                    let (tokens_in, tokens_out) = output
+                        .usage
+                        .as_ref()
+                        .map(|u| (u.input_tokens, u.output_tokens))
+                        .unwrap_or((0, 0));
+                    tracing::info!(
+                        session = %session_id,
+                        elapsed_ms,
+                        tokens_in,
+                        tokens_out,
+                        "Request completed"
+                    );
                     reply_tx.send(output).ok();
                 }
                 Err(e) => {
-                    tracing::error!("Agent error: {e}");
+                    tracing::error!(
+                        session = %session_id,
+                        elapsed_ms,
+                        error = %e,
+                        "Request failed"
+                    );
                     reply_tx.send(Output::text(format!("Error: {e}"))).ok();
                 }
             }
