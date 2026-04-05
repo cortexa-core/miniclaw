@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use futures::StreamExt;
 use serde_json::{json, Value};
 use std::time::Duration;
 
@@ -215,6 +216,10 @@ impl LlmProvider for GeminiProvider {
         true
     }
 
+    fn supports_streaming(&self) -> bool {
+        true
+    }
+
     async fn chat(&self, context: &Context) -> Result<ChatResponse> {
         let body = self.serialize_request(context);
         let url = format!(
@@ -243,6 +248,129 @@ impl LlmProvider for GeminiProvider {
         }
 
         self.parse_response(&response_body)
+    }
+
+    async fn chat_streaming(
+        &self,
+        context: &Context,
+        tx: tokio::sync::mpsc::Sender<String>,
+    ) -> Result<ChatResponse> {
+        let body = self.serialize_request(context);
+        let url = format!(
+            "{}/v1beta/models/{}:streamGenerateContent?key={}&alt=sse",
+            self.base_url, self.model, self.api_key
+        );
+
+        tracing::debug!("Gemini streaming request to {}", self.base_url);
+
+        let response = self
+            .client
+            .post(&url)
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await?;
+
+        let status = response.status();
+
+        if !status.is_success() {
+            let error_body: Value = response.json().await?;
+            let error_msg = error_body["error"]["message"]
+                .as_str()
+                .unwrap_or("Unknown error");
+            return Err(anyhow!("Gemini API error ({}): {}", status, error_msg));
+        }
+
+        let mut full_text = String::new();
+        let mut tool_calls: Vec<ToolCall> = Vec::new();
+        let mut usage = Usage::default();
+        let mut buffer = String::new();
+        let mut tool_call_counter: usize = 0;
+
+        let mut stream = response.bytes_stream();
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result?;
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+            while let Some(newline_pos) = buffer.find('\n') {
+                let line = buffer[..newline_pos].trim().to_string();
+                buffer = buffer[newline_pos + 1..].to_string();
+
+                if line.is_empty() || line.starts_with(':') {
+                    continue;
+                }
+
+                let Some(data) = line.strip_prefix("data: ") else {
+                    continue;
+                };
+
+                let parsed: Value = match serde_json::from_str(data) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::warn!("Failed to parse Gemini SSE chunk: {e}");
+                        continue;
+                    }
+                };
+
+                // Extract parts from candidates[0].content.parts[]
+                if let Some(parts) = parsed["candidates"][0]["content"]["parts"].as_array() {
+                    for part in parts {
+                        // Text part
+                        if let Some(text) = part["text"].as_str() {
+                            if !text.is_empty() {
+                                full_text.push_str(text);
+                                let _ = tx.send(text.to_string()).await;
+                            }
+                        }
+                        // Function call part
+                        if let Some(fc) = part.get("functionCall") {
+                            if fc.is_object() {
+                                let name =
+                                    fc["name"].as_str().unwrap_or("").to_string();
+                                let args = fc["args"].clone();
+                                tool_calls.push(ToolCall {
+                                    id: format!("gemini_{tool_call_counter}"),
+                                    name,
+                                    arguments: args,
+                                });
+                                tool_call_counter += 1;
+                            }
+                        }
+                    }
+                }
+
+                // Extract usage metadata
+                if let Some(um) = parsed.get("usageMetadata") {
+                    if !um.is_null() {
+                        if let Some(pt) = um["promptTokenCount"].as_u64() {
+                            usage.input_tokens = pt as u32;
+                        }
+                        if let Some(ct) = um["candidatesTokenCount"].as_u64() {
+                            usage.output_tokens = ct as u32;
+                        }
+                    }
+                }
+            }
+        }
+
+        let stop_reason = if !tool_calls.is_empty() {
+            StopReason::ToolUse
+        } else {
+            StopReason::EndTurn
+        };
+
+        let text = if full_text.is_empty() {
+            None
+        } else {
+            Some(full_text)
+        };
+
+        Ok(ChatResponse {
+            text,
+            tool_calls,
+            stop_reason,
+            usage,
+        })
     }
 }
 
