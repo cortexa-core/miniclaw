@@ -19,6 +19,8 @@ pub struct Session {
     pub updated_at: DateTime<Utc>,
     #[serde(default)]
     pub needs_consolidation: bool,
+    #[serde(default)]
+    pub consolidation_failures: u32,
 }
 
 impl Session {
@@ -29,6 +31,7 @@ impl Session {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             needs_consolidation: false,
+            consolidation_failures: 0,
         }
     }
 
@@ -270,6 +273,7 @@ impl SessionStore {
             created_at: file_time,
             updated_at: file_time,
             needs_consolidation: false,
+            consolidation_failures: 0,
         })
     }
 }
@@ -325,6 +329,16 @@ impl MemoryManager {
         llm: &dyn LlmProvider,
         memory_max_bytes: usize,
     ) -> Result<()> {
+        if session.consolidation_failures >= 3 {
+            tracing::warn!(
+                "Session {} has failed consolidation {} times, giving up",
+                session.id,
+                session.consolidation_failures
+            );
+            session.needs_consolidation = false;
+            return Ok(());
+        }
+
         if session.messages.len() < 4 {
             // Too few messages to consolidate
             return Ok(());
@@ -409,11 +423,13 @@ impl MemoryManager {
                 }
             }
             Err(e) => {
+                session.consolidation_failures += 1;
                 tracing::warn!("Consolidation LLM call failed: {e}. Keeping messages.");
             }
         }
 
         if summary_saved {
+            session.consolidation_failures = 0;
             // Remove old messages. Find a clean split point that doesn't orphan
             // tool results (which must follow their assistant tool_use message).
             let clean_split = find_clean_split_point(&session.messages, split_point);
@@ -924,5 +940,50 @@ mod tests {
 
         // "a" was persisted to disk before eviction
         assert!(dir.path().join("sessions/a.jsonl").exists());
+    }
+
+    #[tokio::test]
+    async fn test_consolidation_gives_up_after_failures() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("memory")).unwrap();
+        let mgr = MemoryManager::new(dir.path().to_path_buf());
+
+        struct FailingLlm;
+        #[async_trait::async_trait]
+        impl crate::llm::LlmProvider for FailingLlm {
+            async fn chat(
+                &self,
+                _: &crate::llm::types::Context,
+            ) -> anyhow::Result<crate::llm::types::ChatResponse> {
+                Err(anyhow::anyhow!("LLM unavailable"))
+            }
+            fn name(&self) -> &str {
+                "failing"
+            }
+        }
+
+        let mut session = Session::new("test");
+        for i in 0..10 {
+            session.add_message(Role::User, &format!("Msg {i}"));
+            session.add_message(Role::Assistant, &format!("Reply {i}"));
+        }
+
+        // Fail 3 times — each increments counter
+        for _ in 0..3 {
+            session.needs_consolidation = true;
+            mgr.consolidate(&mut session, &FailingLlm, 8192)
+                .await
+                .unwrap();
+            assert!(session.consolidation_failures > 0);
+        }
+        assert_eq!(session.consolidation_failures, 3);
+
+        // 4th attempt: should skip (failures >= 3)
+        session.needs_consolidation = true;
+        mgr.consolidate(&mut session, &FailingLlm, 8192)
+            .await
+            .unwrap();
+        assert!(!session.needs_consolidation);
+        assert_eq!(session.message_count(), 20); // Messages untouched
     }
 }
