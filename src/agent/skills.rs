@@ -166,11 +166,39 @@ impl SkillManager {
 fn parse_yaml_frontmatter(frontmatter: &str) -> anyhow::Result<SkillFrontmatter> {
     let mut toml_lines = Vec::new();
     let mut in_requires = false;
+    let mut current_array_key: Option<String> = None;
+    let mut array_items: Vec<String> = Vec::new();
+
+    // Flush any accumulated block list items as a TOML array
+    let flush_array =
+        |key: &Option<String>, items: &mut Vec<String>, lines: &mut Vec<String>| {
+            if let Some(ref k) = key {
+                if !items.is_empty() {
+                    let elements: Vec<String> =
+                        items.iter().map(|e| format!("\"{e}\"")).collect();
+                    lines.push(format!("{k} = [{}]", elements.join(", ")));
+                    items.clear();
+                }
+            }
+        };
 
     for line in frontmatter.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
+        }
+
+        // Detect block list item: "    - value"
+        if trimmed.starts_with("- ") && current_array_key.is_some() {
+            let item = trimmed.trim_start_matches("- ").trim();
+            array_items.push(item.to_string());
+            continue;
+        }
+
+        // If we were collecting array items and hit a non-list line, flush
+        if current_array_key.is_some() && !trimmed.starts_with("- ") {
+            flush_array(&current_array_key, &mut array_items, &mut toml_lines);
+            current_array_key = None;
         }
 
         if trimmed == "requires:" {
@@ -188,11 +216,18 @@ fn parse_yaml_frontmatter(frontmatter: &str) -> anyhow::Result<SkillFrontmatter>
             let key = key.trim();
             let value = value.trim();
             if value.is_empty() {
+                // Could be the start of a block list (e.g. "tools:")
+                if in_requires {
+                    current_array_key = Some(key.to_string());
+                }
                 continue;
             }
             toml_lines.push(format!("{key} = {}", yaml_value_to_toml(value)));
         }
     }
+
+    // Flush any remaining block list at end of input
+    flush_array(&current_array_key, &mut array_items, &mut toml_lines);
 
     let toml_str = toml_lines.join("\n");
     toml::from_str(&toml_str).map_err(|e| anyhow::anyhow!("Failed to parse skill frontmatter: {e}"))
@@ -306,6 +341,13 @@ mod tests {
         let result = mgr.prompt_content();
         assert!(result.contains("Skill A content"));
         assert!(result.contains("Skill B content"));
+    }
+
+    #[test]
+    fn test_parse_yaml_with_block_list_requires() {
+        let fm = "name: multi-tool\ndescription: Needs multiple tools\nrequires:\n  tools:\n    - shell_exec\n    - file_ops";
+        let parsed = parse_yaml_frontmatter(fm).unwrap();
+        assert_eq!(parsed.requires.tools, vec!["shell_exec", "file_ops"]);
     }
 
     #[test]
