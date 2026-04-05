@@ -30,21 +30,21 @@ pub async fn stream_chat(
     let session_id = req.session_id.clone();
 
     let stream = async_stream::stream! {
+        let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel::<String>(64);
+
         let input = Input {
             id: uuid::Uuid::new_v4().to_string(),
             session_id: session_id.clone(),
             content: req.message.clone(),
-            stream_tx: None,
+            stream_tx: Some(stream_tx),
         };
 
         let (reply_tx, reply_rx) = oneshot::channel::<Output>();
 
-        // Send thinking status
         yield Ok::<_, Infallible>(Event::default()
             .event("status")
             .data(r#"{"type":"thinking"}"#));
 
-        // Send to agent worker
         if inbound_tx.send((input, reply_tx)).await.is_err() {
             yield Ok(Event::default()
                 .event("error")
@@ -52,13 +52,21 @@ pub async fn stream_chat(
             return;
         }
 
-        // Wait for response
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(120),
-            reply_rx,
-        ).await {
-            Ok(Ok(output)) => {
-                // Send usage if available
+        // Spawn a task to wait for the final result
+        let result_handle = tokio::spawn(async move {
+            tokio::time::timeout(std::time::Duration::from_secs(120), reply_rx).await
+        });
+
+        // Stream text chunks as they arrive
+        while let Some(chunk) = stream_rx.recv().await {
+            yield Ok(Event::default()
+                .event("text_delta")
+                .data(serde_json::json!({"text": chunk}).to_string()));
+        }
+
+        // Channel closed — agent is done. Get the final result.
+        match result_handle.await {
+            Ok(Ok(Ok(output))) => {
                 if let Some(usage) = &output.usage {
                     yield Ok(Event::default()
                         .event("usage")
@@ -67,41 +75,14 @@ pub async fn stream_chat(
                             "output_tokens": usage.output_tokens,
                         }).to_string()));
                 }
-
-                // Stream text in chunks for visual streaming effect
-                let text = &output.content;
-                let chunk_size = 20;
-                let mut pos = 0;
-                while pos < text.len() {
-                    let mut end = (pos + chunk_size).min(text.len());
-                    // Safe UTF-8 boundary
-                    while end < text.len() && !text.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    if end <= pos {
-                        end = text.len();
-                    }
-                    let chunk = &text[pos..end];
-                    yield Ok(Event::default()
-                        .event("text_delta")
-                        .data(serde_json::json!({"text": chunk}).to_string()));
-                    pos = end;
-                    tokio::time::sleep(std::time::Duration::from_millis(15)).await;
-                }
-
                 yield Ok(Event::default()
                     .event("done")
                     .data(serde_json::json!({"session_id": session_id}).to_string()));
             }
-            Ok(Err(_)) => {
+            _ => {
                 yield Ok(Event::default()
                     .event("error")
-                    .data(r#"{"error":"Agent worker dropped request"}"#));
-            }
-            Err(_) => {
-                yield Ok(Event::default()
-                    .event("error")
-                    .data(r#"{"error":"Request timed out (120s)"}"#));
+                    .data(r#"{"error":"Request failed or timed out"}"#));
             }
         }
     };
