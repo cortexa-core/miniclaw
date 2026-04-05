@@ -100,8 +100,14 @@ impl Agent {
         };
 
         // Initialize context builder with skill manager
+        let budgets = super::context::ContextBudgets {
+            soul_max: config.agent.context_soul_max,
+            user_max: config.agent.context_user_max,
+            memory_max: config.agent.context_memory_max,
+            daily_notes_max: config.agent.context_daily_notes_max,
+        };
         let mut context_builder =
-            ContextBuilder::new(data_dir.clone(), config.agent.context_cache_ttl_secs);
+            ContextBuilder::new(data_dir.clone(), config.agent.context_cache_ttl_secs, budgets);
         let tool_names: Vec<String> = tool_registry
             .tool_names()
             .iter()

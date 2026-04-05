@@ -20,11 +20,11 @@ struct CachedSystem {
     loaded_at: Instant,
 }
 
-struct ContextBudgets {
-    soul_max: usize,
-    user_max: usize,
-    memory_max: usize,
-    daily_notes_max: usize,
+pub struct ContextBudgets {
+    pub soul_max: usize,
+    pub user_max: usize,
+    pub memory_max: usize,
+    pub daily_notes_max: usize,
 }
 
 impl Default for ContextBudgets {
@@ -63,13 +63,13 @@ You are UniClaw, a helpful AI assistant running on a local device.
 "#;
 
 impl ContextBuilder {
-    pub fn new(data_dir: PathBuf, ttl_secs: u64) -> Self {
+    pub fn new(data_dir: PathBuf, ttl_secs: u64, budgets: ContextBudgets) -> Self {
         Self {
             data_dir,
             cached_system: None,
             skill_manager: None,
             ttl: Duration::from_secs(ttl_secs),
-            budgets: ContextBudgets::default(),
+            budgets,
         }
     }
 
@@ -286,7 +286,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("memory")).unwrap();
         std::fs::create_dir_all(dir.path().join("skills")).unwrap();
 
-        let mut builder = ContextBuilder::new(dir.path().to_path_buf(), 60);
+        let mut builder = ContextBuilder::new(dir.path().to_path_buf(), 60, ContextBudgets::default());
         let session = Session::new("test");
         let ctx = builder.build(&session, &[]).await.unwrap();
         assert!(ctx.system.contains("Test Agent"));
@@ -299,7 +299,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("memory")).unwrap();
         std::fs::create_dir_all(dir.path().join("skills")).unwrap();
 
-        let mut builder = ContextBuilder::new(dir.path().to_path_buf(), 60);
+        let mut builder = ContextBuilder::new(dir.path().to_path_buf(), 60, ContextBudgets::default());
         let session = Session::new("test");
         let ctx = builder.build(&session, &[]).await.unwrap();
         assert!(ctx.system.contains("UniClaw"));
@@ -314,7 +314,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("memory")).unwrap();
         std::fs::create_dir_all(dir.path().join("skills")).unwrap();
 
-        let mut builder = ContextBuilder::new(dir.path().to_path_buf(), 60);
+        let mut builder = ContextBuilder::new(dir.path().to_path_buf(), 60, ContextBudgets::default());
         let session = Session::new("test");
 
         let ctx1 = builder.build(&session, &[]).await.unwrap();

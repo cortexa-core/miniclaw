@@ -82,6 +82,14 @@ pub struct AgentConfig {
     pub session_max_age_days: u64,
     #[serde(default = "default_session_count")]
     pub session_max_count: usize,
+    #[serde(default = "default_context_soul_max")]
+    pub context_soul_max: usize,
+    #[serde(default = "default_context_user_max")]
+    pub context_user_max: usize,
+    #[serde(default = "default_context_memory_max")]
+    pub context_memory_max: usize,
+    #[serde(default = "default_context_daily_notes_max")]
+    pub context_daily_notes_max: usize,
 }
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
@@ -290,6 +298,18 @@ fn default_cron_interval() -> u64 {
 }
 fn default_heartbeat_interval() -> u64 {
     1800
+}
+fn default_context_soul_max() -> usize {
+    4096
+}
+fn default_context_user_max() -> usize {
+    2048
+}
+fn default_context_memory_max() -> usize {
+    4096
+}
+fn default_context_daily_notes_max() -> usize {
+    3072
 }
 fn default_max_retries() -> u32 {
     2
