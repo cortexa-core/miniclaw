@@ -3,9 +3,6 @@ max_iterations = 10
 max_tool_calls_per_iteration = 4
 consolidation_threshold = 40
 context_cache_ttl_secs = 60
-memory_max_bytes = 8192
-session_max_age_days = 30
-session_max_count = 100
 
 [llm]
 provider = "openai_compatible"
@@ -16,12 +13,6 @@ max_tokens = 1024
 temperature = 0.7
 timeout_secs = 60
 
-# To use Anthropic instead:
-# provider = "anthropic"
-# api_key_env = "ANTHROPIC_API_KEY"
-# model = "claude-sonnet-4-6"
-# base_url = "https://api.anthropic.com"
-
 # Optional fallback provider (e.g., local Ollama)
 # [llm.fallback]
 # provider = "openai_compatible"
@@ -31,13 +22,9 @@ timeout_secs = 60
 
 [server]
 http_enabled = true
-http_port = 3000
+http_port = 3001
 http_bind = "0.0.0.0"
 mqtt_enabled = false
-mqtt_broker = "localhost"
-mqtt_port = 1883
-mqtt_device_id = "uniclaw-01"
-api_token_env = ""  # Set to env var name containing bearer token (e.g., "UNICLAW_API_TOKEN")
 
 [cron]
 enabled = true
@@ -55,12 +42,11 @@ shell_timeout_secs = 10
 http_fetch_enabled = true
 http_fetch_timeout_secs = 15
 
+[[mcp_servers]]
+name = "filesystem"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+
 [logging]
 level = "info"
-
-# Messaging channels
-# [channels.telegram]
-# enabled = true
-# bot_token_env = "TELEGRAM_BOT_TOKEN"
-# allowed_users = []
-# respond_in_groups = "mention"
