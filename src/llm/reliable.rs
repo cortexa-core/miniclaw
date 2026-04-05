@@ -93,8 +93,10 @@ impl ReliableProvider {
                     }
 
                     if attempt < self.max_retries {
-                        let backoff_ms =
-                            std::cmp::min(self.base_backoff_ms.saturating_mul(1 << attempt), 10_000);
+                        let backoff_ms = std::cmp::min(
+                            self.base_backoff_ms.saturating_mul(1 << attempt),
+                            10_000,
+                        );
                         info!(
                             provider = provider.name(),
                             attempt = attempt + 1,

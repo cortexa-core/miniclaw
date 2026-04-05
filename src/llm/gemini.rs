@@ -325,8 +325,7 @@ impl LlmProvider for GeminiProvider {
                         // Function call part
                         if let Some(fc) = part.get("functionCall") {
                             if fc.is_object() {
-                                let name =
-                                    fc["name"].as_str().unwrap_or("").to_string();
+                                let name = fc["name"].as_str().unwrap_or("").to_string();
                                 let args = fc["args"].clone();
                                 tool_calls.push(ToolCall {
                                     id: format!("gemini_{tool_call_counter}"),

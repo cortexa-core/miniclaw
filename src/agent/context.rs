@@ -286,7 +286,8 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("memory")).unwrap();
         std::fs::create_dir_all(dir.path().join("skills")).unwrap();
 
-        let mut builder = ContextBuilder::new(dir.path().to_path_buf(), 60, ContextBudgets::default());
+        let mut builder =
+            ContextBuilder::new(dir.path().to_path_buf(), 60, ContextBudgets::default());
         let session = Session::new("test");
         let ctx = builder.build(&session, &[]).await.unwrap();
         assert!(ctx.system.contains("Test Agent"));
@@ -299,7 +300,8 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("memory")).unwrap();
         std::fs::create_dir_all(dir.path().join("skills")).unwrap();
 
-        let mut builder = ContextBuilder::new(dir.path().to_path_buf(), 60, ContextBudgets::default());
+        let mut builder =
+            ContextBuilder::new(dir.path().to_path_buf(), 60, ContextBudgets::default());
         let session = Session::new("test");
         let ctx = builder.build(&session, &[]).await.unwrap();
         assert!(ctx.system.contains("UniClaw"));
@@ -314,7 +316,8 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("memory")).unwrap();
         std::fs::create_dir_all(dir.path().join("skills")).unwrap();
 
-        let mut builder = ContextBuilder::new(dir.path().to_path_buf(), 60, ContextBudgets::default());
+        let mut builder =
+            ContextBuilder::new(dir.path().to_path_buf(), 60, ContextBudgets::default());
         let session = Session::new("test");
 
         let ctx1 = builder.build(&session, &[]).await.unwrap();

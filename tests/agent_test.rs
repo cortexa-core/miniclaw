@@ -551,13 +551,7 @@ async fn test_consolidation_triggers_at_threshold() {
     let mut registry = ToolRegistry::new();
     tools::register_default_tools(&mut registry);
 
-    let mut agent = Agent::new(
-        Box::new(mock),
-        registry,
-        &config,
-        dir.path().to_path_buf(),
-    )
-    .await;
+    let mut agent = Agent::new(Box::new(mock), registry, &config, dir.path().to_path_buf()).await;
 
     let session_id = "consolidation-test";
 

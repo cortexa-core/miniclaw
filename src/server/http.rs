@@ -22,7 +22,8 @@ pub struct HttpState {
     pub config_path: std::path::PathBuf,
     pub data_dir: std::path::PathBuf,
     pub api_token: String,
-    pub rate_limiter: Arc<std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, u32)>>>,
+    pub rate_limiter:
+        Arc<std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, u32)>>>,
     pub rate_limit_per_minute: u32,
 }
 

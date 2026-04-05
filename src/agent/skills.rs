@@ -170,17 +170,15 @@ fn parse_yaml_frontmatter(frontmatter: &str) -> anyhow::Result<SkillFrontmatter>
     let mut array_items: Vec<String> = Vec::new();
 
     // Flush any accumulated block list items as a TOML array
-    let flush_array =
-        |key: &Option<String>, items: &mut Vec<String>, lines: &mut Vec<String>| {
-            if let Some(ref k) = key {
-                if !items.is_empty() {
-                    let elements: Vec<String> =
-                        items.iter().map(|e| format!("\"{e}\"")).collect();
-                    lines.push(format!("{k} = [{}]", elements.join(", ")));
-                    items.clear();
-                }
+    let flush_array = |key: &Option<String>, items: &mut Vec<String>, lines: &mut Vec<String>| {
+        if let Some(ref k) = key {
+            if !items.is_empty() {
+                let elements: Vec<String> = items.iter().map(|e| format!("\"{e}\"")).collect();
+                lines.push(format!("{k} = [{}]", elements.join(", ")));
+                items.clear();
             }
-        };
+        }
+    };
 
     for line in frontmatter.lines() {
         let trimmed = line.trim();

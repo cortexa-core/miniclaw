@@ -108,8 +108,11 @@ impl Agent {
             memory_max: config.agent.context_memory_max,
             daily_notes_max: config.agent.context_daily_notes_max,
         };
-        let mut context_builder =
-            ContextBuilder::new(data_dir.clone(), config.agent.context_cache_ttl_secs, budgets);
+        let mut context_builder = ContextBuilder::new(
+            data_dir.clone(),
+            config.agent.context_cache_ttl_secs,
+            budgets,
+        );
         let tool_names: Vec<String> = tool_registry
             .tool_names()
             .iter()

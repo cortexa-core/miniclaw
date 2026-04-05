@@ -373,10 +373,8 @@ impl LlmProvider for OpenAiProvider {
                 // Extract usage from final chunk
                 if let Some(u) = parsed.get("usage") {
                     if !u.is_null() {
-                        usage.input_tokens =
-                            u["prompt_tokens"].as_u64().unwrap_or(0) as u32;
-                        usage.output_tokens =
-                            u["completion_tokens"].as_u64().unwrap_or(0) as u32;
+                        usage.input_tokens = u["prompt_tokens"].as_u64().unwrap_or(0) as u32;
+                        usage.output_tokens = u["completion_tokens"].as_u64().unwrap_or(0) as u32;
                     }
                 }
             }

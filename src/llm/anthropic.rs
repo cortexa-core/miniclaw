@@ -280,15 +280,12 @@ impl LlmProvider for AnthropicProvider {
                 match current_event.as_str() {
                     "message_start" => {
                         // Extract input token usage
-                        if let Some(input) =
-                            parsed["message"]["usage"]["input_tokens"].as_u64()
-                        {
+                        if let Some(input) = parsed["message"]["usage"]["input_tokens"].as_u64() {
                             usage.input_tokens = input as u32;
                         }
                     }
                     "content_block_start" => {
-                        let block_type =
-                            parsed["content_block"]["type"].as_str().unwrap_or("");
+                        let block_type = parsed["content_block"]["type"].as_str().unwrap_or("");
                         if block_type == "tool_use" {
                             building_tool = true;
                             current_tool_id = parsed["content_block"]["id"]
@@ -312,9 +309,7 @@ impl LlmProvider for AnthropicProvider {
                                 }
                             }
                         } else if delta_type == "input_json_delta" {
-                            if let Some(partial) =
-                                parsed["delta"]["partial_json"].as_str()
-                            {
+                            if let Some(partial) = parsed["delta"]["partial_json"].as_str() {
                                 current_tool_args.push_str(partial);
                             }
                         }
@@ -322,8 +317,7 @@ impl LlmProvider for AnthropicProvider {
                     "content_block_stop" => {
                         if building_tool {
                             let arguments: serde_json::Value =
-                                serde_json::from_str(&current_tool_args)
-                                    .unwrap_or(json!({}));
+                                serde_json::from_str(&current_tool_args).unwrap_or(json!({}));
                             tool_calls.push(ToolCall {
                                 id: current_tool_id.clone(),
                                 name: current_tool_name.clone(),
@@ -336,8 +330,7 @@ impl LlmProvider for AnthropicProvider {
                         }
                     }
                     "message_delta" => {
-                        if let Some(output) = parsed["usage"]["output_tokens"].as_u64()
-                        {
+                        if let Some(output) = parsed["usage"]["output_tokens"].as_u64() {
                             usage.output_tokens = output as u32;
                         }
                     }
