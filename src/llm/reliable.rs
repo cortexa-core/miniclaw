@@ -72,6 +72,46 @@ impl ReliableProvider {
         Err(last_error
             .unwrap_or_else(|| anyhow!("Provider {} failed with no attempts", provider.name())))
     }
+
+    /// Try a single provider's streaming with retry loop for retryable errors.
+    async fn try_provider_streaming(
+        &self,
+        provider: &dyn LlmProvider,
+        context: &Context,
+        tx: tokio::sync::mpsc::Sender<String>,
+    ) -> Result<ChatResponse> {
+        let mut last_error = None;
+
+        for attempt in 0..=self.max_retries {
+            match provider.chat_streaming(context, tx.clone()).await {
+                Ok(response) => return Ok(response),
+                Err(e) => {
+                    let kind = classify_anyhow_error(&e);
+
+                    if !kind.is_retryable() {
+                        return Err(e);
+                    }
+
+                    if attempt < self.max_retries {
+                        let backoff_ms =
+                            std::cmp::min(self.base_backoff_ms.saturating_mul(1 << attempt), 10_000);
+                        info!(
+                            provider = provider.name(),
+                            attempt = attempt + 1,
+                            max = self.max_retries + 1,
+                            backoff_ms,
+                            "Streaming attempt failed, retrying"
+                        );
+                        tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+                    }
+                    last_error = Some(e);
+                }
+            }
+        }
+
+        Err(last_error
+            .unwrap_or_else(|| anyhow!("Provider '{}' streaming failed", provider.name())))
+    }
 }
 
 #[async_trait]
@@ -114,6 +154,54 @@ impl LlmProvider for ReliableProvider {
 
     fn supports_vision(&self) -> bool {
         self.primary.supports_vision()
+    }
+
+    async fn chat_streaming(
+        &self,
+        context: &Context,
+        tx: tokio::sync::mpsc::Sender<String>,
+    ) -> Result<ChatResponse> {
+        // Try primary with retries
+        match self
+            .try_provider_streaming(&*self.primary, context, tx.clone())
+            .await
+        {
+            Ok(response) => return Ok(response),
+            Err(e) => {
+                if self.fallbacks.is_empty() {
+                    return Err(e);
+                }
+                warn!(
+                    "Primary provider '{}' streaming failed: {e}, trying fallbacks",
+                    self.primary.name()
+                );
+            }
+        }
+
+        let mut errors = vec![format!("Primary ({}): exhausted", self.primary.name())];
+        for fallback in &self.fallbacks {
+            match self
+                .try_provider_streaming(&**fallback, context, tx.clone())
+                .await
+            {
+                Ok(response) => {
+                    info!(
+                        "Fallback provider '{}' streaming succeeded",
+                        fallback.name()
+                    );
+                    return Ok(response);
+                }
+                Err(e) => {
+                    errors.push(format!("{}: {e}", fallback.name()));
+                }
+            }
+        }
+
+        Err(anyhow!("All providers failed:\n  {}", errors.join("\n  ")))
+    }
+
+    fn supports_streaming(&self) -> bool {
+        self.primary.supports_streaming()
     }
 }
 
