@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use anyhow::{anyhow, Result};
@@ -387,4 +388,232 @@ async fn test_unknown_tool() {
         .await
         .unwrap();
     assert_eq!(output.content, "Sorry, that didn't work.");
+}
+
+// --- Context-aware mock that reports message count ---
+
+struct ContextAwareMockLlm {
+    call_count: AtomicUsize,
+}
+
+impl ContextAwareMockLlm {
+    fn new() -> Self {
+        Self {
+            call_count: AtomicUsize::new(0),
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for ContextAwareMockLlm {
+    fn name(&self) -> &str {
+        "context-aware-mock"
+    }
+
+    async fn chat(&self, context: &Context) -> Result<ChatResponse> {
+        self.call_count.fetch_add(1, Ordering::SeqCst);
+        Ok(ChatResponse {
+            text: Some(format!("I see {} messages", context.messages.len())),
+            tool_calls: vec![],
+            stop_reason: StopReason::EndTurn,
+            usage: Usage::default(),
+        })
+    }
+}
+
+#[tokio::test]
+async fn test_session_persists_across_calls() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("memory")).unwrap();
+    std::fs::create_dir_all(dir.path().join("sessions")).unwrap();
+    std::fs::create_dir_all(dir.path().join("skills")).unwrap();
+
+    let mock = ContextAwareMockLlm::new();
+
+    let mut registry = ToolRegistry::new();
+    tools::register_default_tools(&mut registry);
+
+    let mut agent = Agent::new(
+        Box::new(mock),
+        registry,
+        &test_config(),
+        dir.path().to_path_buf(),
+    )
+    .await;
+
+    // First call — the LLM should see just 1 message (the user message)
+    let input1 = Input {
+        id: "req-1".into(),
+        session_id: "persist-test".into(),
+        content: "Hello".into(),
+    };
+    let output1 = agent.process(&input1).await.unwrap();
+    assert!(
+        output1.content.contains("1 messages"),
+        "First turn should see 1 message in context, got: {}",
+        output1.content
+    );
+
+    // Second call — same session, LLM should see previous user + assistant + new user = 3
+    let input2 = Input {
+        id: "req-2".into(),
+        session_id: "persist-test".into(),
+        content: "Remember me?".into(),
+    };
+    let output2 = agent.process(&input2).await.unwrap();
+    assert!(
+        output2.content.contains("3 messages"),
+        "Second turn should see 3 messages in context, got: {}",
+        output2.content
+    );
+}
+
+// --- Mock that returns enough responses for consolidation testing ---
+
+struct ConsolidationMockLlm {
+    call_count: AtomicUsize,
+}
+
+impl ConsolidationMockLlm {
+    fn new() -> Self {
+        Self {
+            call_count: AtomicUsize::new(0),
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for ConsolidationMockLlm {
+    fn name(&self) -> &str {
+        "consolidation-mock"
+    }
+
+    async fn chat(&self, context: &Context) -> Result<ChatResponse> {
+        let n = self.call_count.fetch_add(1, Ordering::SeqCst);
+
+        // Check if this is a consolidation request (system prompt contains "Summarize")
+        let is_consolidation = context.messages.iter().any(|m| {
+            if let MessageContent::Text { text } = &m.content {
+                text.contains("Summarize the key facts")
+            } else {
+                false
+            }
+        });
+
+        if is_consolidation {
+            return Ok(ChatResponse {
+                text: Some("- User sent several test messages.".to_string()),
+                tool_calls: vec![],
+                stop_reason: StopReason::EndTurn,
+                usage: Usage::default(),
+            });
+        }
+
+        Ok(ChatResponse {
+            text: Some(format!("Reply {n}")),
+            tool_calls: vec![],
+            stop_reason: StopReason::EndTurn,
+            usage: Usage::default(),
+        })
+    }
+}
+
+fn consolidation_test_config() -> Config {
+    toml::from_str(
+        r#"
+[agent]
+max_iterations = 5
+consolidation_threshold = 6
+
+[llm]
+provider = "openai_compatible"
+api_key_env = ""
+model = "mock"
+base_url = "http://localhost"
+"#,
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn test_consolidation_triggers_at_threshold() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("memory")).unwrap();
+    std::fs::create_dir_all(dir.path().join("sessions")).unwrap();
+    std::fs::create_dir_all(dir.path().join("skills")).unwrap();
+
+    let mock = ConsolidationMockLlm::new();
+    let config = consolidation_test_config();
+
+    let mut registry = ToolRegistry::new();
+    tools::register_default_tools(&mut registry);
+
+    let mut agent = Agent::new(
+        Box::new(mock),
+        registry,
+        &config,
+        dir.path().to_path_buf(),
+    )
+    .await;
+
+    let session_id = "consolidation-test";
+
+    // Send enough messages to exceed threshold of 6.
+    // Each turn adds 2 messages (user + assistant), so 4 turns = 8 messages > 6.
+    for i in 0..4 {
+        let input = Input {
+            id: format!("req-{i}"),
+            session_id: session_id.into(),
+            content: format!("Message {i}"),
+        };
+        agent.process(&input).await.unwrap();
+    }
+
+    // After turn 4, session has 8 messages (> threshold of 6),
+    // so needs_consolidation should be flagged.
+    // Verify session file has 8 messages before consolidation.
+    let session_path = dir.path().join(format!("sessions/{session_id}.jsonl"));
+    let pre_content = std::fs::read_to_string(&session_path).unwrap();
+    let pre_lines: Vec<&str> = pre_content.lines().collect();
+    assert_eq!(
+        pre_lines.len(),
+        8,
+        "Should have 8 messages before consolidation"
+    );
+
+    // Send one more message — this triggers consolidation at the START of this turn.
+    let trigger_input = Input {
+        id: "req-trigger".into(),
+        session_id: session_id.into(),
+        content: "Trigger consolidation".into(),
+    };
+    agent.process(&trigger_input).await.unwrap();
+
+    // After consolidation: old messages were split in half (4 removed),
+    // remaining 4 + 2 new messages from this turn = 6 total.
+    // But the exact count depends on clean_split_point. The key assertion
+    // is that the count DECREASED from the pre-consolidation 8+2=10.
+    let post_content = std::fs::read_to_string(&session_path).unwrap();
+    let post_lines: Vec<&str> = post_content.lines().collect();
+    assert!(
+        post_lines.len() < 10,
+        "Consolidation should reduce message count. Expected < 10, got {}",
+        post_lines.len()
+    );
+
+    // Verify MEMORY.md was written with the consolidation summary
+    let memory_path = dir.path().join("memory/MEMORY.md");
+    assert!(
+        memory_path.exists(),
+        "MEMORY.md should be created during consolidation"
+    );
+    let memory_content = std::fs::read_to_string(&memory_path).unwrap();
+    assert!(
+        memory_content.contains("Consolidated"),
+        "MEMORY.md should contain consolidation header"
+    );
+    assert!(
+        memory_content.contains("test messages"),
+        "MEMORY.md should contain the mock summary"
+    );
 }
