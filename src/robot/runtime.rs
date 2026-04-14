@@ -3,6 +3,7 @@ use tokio::sync::{mpsc, watch};
 
 use super::bridge::{HardwareBridge, HardwareCommand};
 use super::description::RobotDescription;
+use super::safety;
 use super::world_state::WorldState;
 
 /// The robot runtime: owns the hardware bridge, polls sensors, and executes actions.
@@ -86,6 +87,36 @@ impl RobotRuntime {
                     }
                 }
             }));
+        }
+
+        // Safety monitor
+        if let Some(ref safety_config) = self.description.safety {
+            let safety_rules: Vec<_> = safety_config
+                .rules
+                .iter()
+                .filter_map(|r| match safety::ParsedRule::parse(r) {
+                    Ok(parsed) => Some(parsed),
+                    Err(e) => {
+                        tracing::warn!("Skipping safety rule '{}': {e}", r.name);
+                        None
+                    }
+                })
+                .collect();
+
+            if !safety_rules.is_empty() {
+                let mut monitor = safety::SafetyMonitor::new(
+                    safety_rules,
+                    self.world_rx.clone(),
+                    self.action_tx.clone(),
+                );
+                tracing::info!(
+                    "Safety monitor active with {} rule(s)",
+                    monitor.rules_count()
+                );
+                tasks.push(tokio::spawn(async move {
+                    monitor.run().await;
+                }));
+            }
         }
 
         tracing::info!(
