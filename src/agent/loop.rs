@@ -136,6 +136,16 @@ impl Agent {
         }
     }
 
+    /// Set robot-specific context on the agent: static robot prompt + live world state.
+    #[allow(dead_code)]
+    pub fn set_robot_context(
+        &mut self,
+        robot_prompt: String,
+        world_rx: tokio::sync::watch::Receiver<crate::robot::world_state::WorldState>,
+    ) {
+        self.context_builder.set_robot_context(robot_prompt, world_rx);
+    }
+
     /// Run session garbage collection using config limits.
     /// Should be called once at startup before processing requests.
     pub async fn cleanup_sessions(&mut self) -> Result<usize> {

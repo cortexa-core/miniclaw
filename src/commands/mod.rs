@@ -1,4 +1,5 @@
 pub mod chat;
+pub mod robot;
 pub mod serve;
 
 use anyhow::Result;

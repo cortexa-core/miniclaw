@@ -47,6 +47,15 @@ enum Commands {
     },
     /// Start the server (HTTP API + MQTT + cron + heartbeat)
     Serve,
+    /// Start an interactive robot session
+    Robot {
+        /// Path to robot.toml configuration
+        #[arg(long, default_value = "data/robot.toml")]
+        robot_config: std::path::PathBuf,
+        /// Single message (non-interactive mode)
+        #[arg(long, short)]
+        message: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -59,5 +68,9 @@ async fn main() -> Result<()> {
             commands::chat::run(&cli.config, &cli.data_dir, message, &session).await
         }
         Commands::Serve => commands::serve::run(&cli.config, &cli.data_dir).await,
+        Commands::Robot {
+            robot_config,
+            message,
+        } => commands::robot::run(&cli.config, &cli.data_dir, &robot_config, message).await,
     }
 }
