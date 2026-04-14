@@ -106,6 +106,19 @@ impl GeminiProvider {
                         "parts": [{"text": text}]
                     }));
                 }
+                MessageContent::TextWithImage {
+                    text,
+                    image_base64,
+                    mime_type,
+                } => {
+                    result.push(json!({
+                        "role": "user",
+                        "parts": [
+                            {"inlineData": {"mimeType": mime_type, "data": image_base64}},
+                            {"text": text}
+                        ]
+                    }));
+                }
                 MessageContent::ToolUse { text, tool_calls } => {
                     let mut parts = Vec::new();
                     if let Some(t) = text {
@@ -474,6 +487,23 @@ mod tests {
         assert_eq!(resp.tool_calls[0].name, "get_time");
         assert_eq!(resp.tool_calls[0].arguments["timezone"], "UTC");
         assert_eq!(resp.stop_reason, StopReason::ToolUse);
+    }
+
+    #[test]
+    fn test_serialize_image_message() {
+        let provider = test_provider();
+        let messages = vec![Message::user_with_image(
+            "What is this?",
+            "aGVsbG8=".into(),
+            "image/png",
+        )];
+        let serialized = provider.serialize_messages(&messages);
+        assert_eq!(serialized.len(), 1);
+        assert_eq!(serialized[0]["role"], "user");
+        let parts = serialized[0]["parts"].as_array().unwrap();
+        assert_eq!(parts[0]["inlineData"]["mimeType"], "image/png");
+        assert_eq!(parts[0]["inlineData"]["data"], "aGVsbG8=");
+        assert_eq!(parts[1]["text"], "What is this?");
     }
 
     #[test]

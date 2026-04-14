@@ -81,6 +81,26 @@ impl AnthropicProvider {
                         "content": content,
                     }));
                 }
+                MessageContent::TextWithImage {
+                    text,
+                    image_base64,
+                    mime_type,
+                } => {
+                    result.push(json!({
+                        "role": msg.role.to_string(),
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": mime_type,
+                                    "data": image_base64,
+                                }
+                            },
+                            {"type": "text", "text": text}
+                        ],
+                    }));
+                }
                 MessageContent::ToolResult {
                     tool_use_id,
                     content,
@@ -438,6 +458,25 @@ mod tests {
         // tool result is a user message
         let tool_result = &serialized[2];
         assert_eq!(tool_result["role"], "user");
+    }
+
+    #[test]
+    fn test_serialize_image_message() {
+        let provider = test_provider();
+        let messages = vec![Message::user_with_image(
+            "What is this?",
+            "aGVsbG8=".into(),
+            "image/png",
+        )];
+        let serialized = provider.serialize_messages(&messages);
+        assert_eq!(serialized.len(), 1);
+        let content = serialized[0]["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "image");
+        assert_eq!(content[0]["source"]["type"], "base64");
+        assert_eq!(content[0]["source"]["media_type"], "image/png");
+        assert_eq!(content[0]["source"]["data"], "aGVsbG8=");
+        assert_eq!(content[1]["type"], "text");
+        assert_eq!(content[1]["text"], "What is this?");
     }
 
     #[test]

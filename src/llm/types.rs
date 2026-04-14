@@ -68,6 +68,19 @@ impl Message {
             MessageContent::Text { text } => text,
             MessageContent::ToolUse { text, .. } => text.as_deref().unwrap_or("[tool call]"),
             MessageContent::ToolResult { content, .. } => content,
+            MessageContent::TextWithImage { text, .. } => text,
+        }
+    }
+
+    #[allow(dead_code)] // used in tests and future vision pipeline
+    pub fn user_with_image(text: &str, image_base64: String, mime_type: &str) -> Self {
+        Self {
+            role: Role::User,
+            content: MessageContent::TextWithImage {
+                text: text.to_string(),
+                image_base64,
+                mime_type: mime_type.to_string(),
+            },
         }
     }
 }
@@ -103,6 +116,11 @@ pub enum MessageContent {
     ToolResult {
         tool_use_id: String,
         content: String,
+    },
+    TextWithImage {
+        text: String,
+        image_base64: String,
+        mime_type: String,
     },
 }
 
@@ -254,6 +272,25 @@ mod tests {
         assert!(ctx.system.is_empty());
         assert_eq!(ctx.messages.len(), 1);
         assert_eq!(ctx.messages[0].content_text(), "Summarize this");
+    }
+
+    #[test]
+    fn test_image_message_roundtrip() {
+        let msg = Message::user_with_image("describe this", "base64data".into(), "image/jpeg");
+        let json = serde_json::to_string(&msg).unwrap();
+        let parsed: Message = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.content_text(), "describe this");
+        if let MessageContent::TextWithImage {
+            image_base64,
+            mime_type,
+            ..
+        } = &parsed.content
+        {
+            assert_eq!(image_base64, "base64data");
+            assert_eq!(mime_type, "image/jpeg");
+        } else {
+            panic!("Expected TextWithImage");
+        }
     }
 
     #[test]

@@ -109,6 +109,22 @@ impl OpenAiProvider {
                     assistant_msg["tool_calls"] = json!(calls);
                     messages.push(assistant_msg);
                 }
+                MessageContent::TextWithImage {
+                    text,
+                    image_base64,
+                    mime_type,
+                } => {
+                    messages.push(json!({
+                        "role": msg.role.to_string(),
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": format!("data:{mime_type};base64,{image_base64}")}
+                            },
+                            {"type": "text", "text": text}
+                        ],
+                    }));
+                }
                 MessageContent::ToolResult {
                     tool_use_id,
                     content,
@@ -499,6 +515,32 @@ mod tests {
         assert!(messages[1]["tool_calls"].is_array());
         assert_eq!(messages[2]["role"], "tool");
         assert_eq!(messages[2]["tool_call_id"], "call_1");
+    }
+
+    #[test]
+    fn test_serialize_image_message() {
+        let provider = test_provider();
+        let ctx = Context {
+            system: String::new(),
+            messages: vec![Message::user_with_image(
+                "What is this?",
+                "aGVsbG8=".into(),
+                "image/png",
+            )],
+            tool_schemas: vec![],
+        };
+        let body = provider.serialize_request(&ctx);
+        let messages = body["messages"].as_array().unwrap();
+        // Only the user message (no system since it's empty)
+        assert_eq!(messages.len(), 1);
+        let content = messages[0]["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "image_url");
+        assert_eq!(
+            content[0]["image_url"]["url"],
+            "data:image/png;base64,aGVsbG8="
+        );
+        assert_eq!(content[1]["type"], "text");
+        assert_eq!(content[1]["text"], "What is this?");
     }
 
     #[test]
