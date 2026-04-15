@@ -52,6 +52,7 @@ mime_guess = "2"
 # Channels (optional)
 teloxide = { version = "0.13", features = ["macros"], optional = true }
 tokio-serial = { version = "5", optional = true }
+tokio-tungstenite = { version = "0.24", optional = true, features = ["connect"] }
 
 [dev-dependencies]
 tempfile = "3"
@@ -62,6 +63,7 @@ default = []
 telegram = ["teloxide"]
 camera = []
 serial = ["dep:tokio-serial"]
+ros2 = ["dep:tokio-tungstenite"]
 
 [profile.release]
 lto = true

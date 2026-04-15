@@ -67,7 +67,10 @@ impl Frame {
     pub fn decode(data: &[u8]) -> Result<(Frame, usize)> {
         // Minimum frame: START(1) + LEN(2) + SEQ(1) + TYPE(1) + CRC(1) = 6
         if data.len() < 6 {
-            bail!("incomplete frame: need at least 6 bytes, got {}", data.len());
+            bail!(
+                "incomplete frame: need at least 6 bytes, got {}",
+                data.len()
+            );
         }
         if data[0] != START_BYTE {
             bail!("bad start byte: expected 0xAA, got 0x{:02X}", data[0]);
@@ -76,11 +79,7 @@ impl Frame {
         let len = u16::from_le_bytes([data[1], data[2]]) as usize;
         let total = 1 + 2 + len + 1; // start + len_field + inner + crc
         if data.len() < total {
-            bail!(
-                "incomplete frame: need {} bytes, got {}",
-                total,
-                data.len()
-            );
+            bail!("incomplete frame: need {} bytes, got {}", total, data.len());
         }
 
         // Verify CRC: XOR of bytes from LEN through PAYLOAD (indices 1..1+2+len)
@@ -274,11 +273,7 @@ mod bridge {
         /// - `path`: device path, e.g. "/dev/ttyAMA0" or "/dev/ttyUSB0"
         /// - `baud`: baud rate (typically 115200)
         /// - `sensor_map`: maps human-readable sensor names to MCU sensor IDs
-        pub fn new(
-            path: &str,
-            baud: u32,
-            sensor_map: HashMap<String, u8>,
-        ) -> Result<Self> {
+        pub fn new(path: &str, baud: u32, sensor_map: HashMap<String, u8>) -> Result<Self> {
             let port = tokio_serial::new(path, baud).open_native_async()?;
             Ok(Self {
                 port: Mutex::new(port),
@@ -292,11 +287,7 @@ mod bridge {
         }
 
         /// Send a frame and wait for any response frame (up to `timeout_ms`).
-        async fn send_and_receive(
-            &self,
-            frame: Frame,
-            timeout_ms: u64,
-        ) -> Result<Frame> {
+        async fn send_and_receive(&self, frame: Frame, timeout_ms: u64) -> Result<Frame> {
             let wire = frame.encode();
             let mut port = self.port.lock().await;
             port.write_all(&wire).await?;
@@ -345,22 +336,9 @@ mod bridge {
                     name: _,
                     speed,
                     duration_ms,
-                } => motor_set_frame(
-                    seq,
-                    0,
-                    speed as i16,
-                    duration_ms.unwrap_or(0) as u16,
-                ),
-                HardwareCommand::LedSet {
-                    name: _,
-                    r,
-                    g,
-                    b,
-                } => led_set_frame(seq, 0, r, g, b),
-                HardwareCommand::LedPattern {
-                    name: _,
-                    pattern,
-                } => {
+                } => motor_set_frame(seq, 0, speed as i16, duration_ms.unwrap_or(0) as u16),
+                HardwareCommand::LedSet { name: _, r, g, b } => led_set_frame(seq, 0, r, g, b),
+                HardwareCommand::LedPattern { name: _, pattern } => {
                     let pat_id: u8 = pattern.parse().unwrap_or(0);
                     led_pattern_frame(seq, 0, pat_id)
                 }
@@ -380,10 +358,7 @@ mod bridge {
             let frame = sensor_request_frame(seq, hw_id);
             let resp = self.send_and_receive(frame, 500).await?;
             if resp.cmd_type != RESP_SENSOR_DATA {
-                bail!(
-                    "Expected SENSOR_DATA (0x82), got 0x{:02X}",
-                    resp.cmd_type
-                );
+                bail!("Expected SENSOR_DATA (0x82), got 0x{:02X}", resp.cmd_type);
             }
             let (_id, value) = parse_sensor_data(&resp.payload)?;
             Ok(value)
@@ -463,8 +438,14 @@ mod tests {
         assert_eq!(decoded, original);
         // Verify payload contents
         assert_eq!(decoded.payload[0], 2); // servo id
-        assert_eq!(u16::from_le_bytes([decoded.payload[1], decoded.payload[2]]), 90);
-        assert_eq!(u16::from_le_bytes([decoded.payload[3], decoded.payload[4]]), 300);
+        assert_eq!(
+            u16::from_le_bytes([decoded.payload[1], decoded.payload[2]]),
+            90
+        );
+        assert_eq!(
+            u16::from_le_bytes([decoded.payload[3], decoded.payload[4]]),
+            300
+        );
     }
 
     #[test]

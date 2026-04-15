@@ -1,5 +1,7 @@
 pub mod mock;
 #[allow(dead_code)]
+pub mod ros2;
+#[allow(dead_code)]
 pub mod serial;
 
 use anyhow::Result;

@@ -114,7 +114,7 @@ pub struct HardwareConfig {
     pub ros2: Option<Ros2Config>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Ros2Config {
     #[serde(default)]
     pub namespace: Option<String>,
@@ -122,6 +122,18 @@ pub struct Ros2Config {
     pub cmd_topic: Option<String>,
     #[serde(default)]
     pub sensor_topic: Option<String>,
+    #[serde(default)]
+    pub rosbridge_url: Option<String>,
+    #[serde(default)]
+    pub cmd_vel_topic: Option<String>,
+    #[serde(default)]
+    pub odom_topic: Option<String>,
+    #[serde(default)]
+    pub scan_topic: Option<String>,
+    #[serde(default)]
+    pub camera_topic: Option<String>,
+    #[serde(default)]
+    pub navigate_action: Option<String>,
 }
 
 impl RobotDescription {

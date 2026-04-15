@@ -9,6 +9,8 @@ pub mod perception_tools;
 pub mod registry;
 #[allow(dead_code)]
 pub mod robot_actions;
+#[allow(dead_code)]
+pub mod ros2_tools;
 pub mod shell;
 pub mod system;
 

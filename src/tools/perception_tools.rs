@@ -120,10 +120,7 @@ mod tests {
 
     fn test_ctx_with_world(
         world_tx: &tokio::sync::watch::Sender<WorldState>,
-    ) -> (
-        ToolContext,
-        tokio::sync::watch::Receiver<WorldState>,
-    ) {
+    ) -> (ToolContext, tokio::sync::watch::Receiver<WorldState>) {
         let world_rx = world_tx.subscribe();
         let ctx = ToolContext {
             data_dir: PathBuf::from("/tmp/uniclaw-test"),
