@@ -9,4 +9,5 @@ pub mod perception;
 pub mod runtime;
 #[allow(dead_code)]
 pub mod safety;
+pub mod voice;
 pub mod world_state;
