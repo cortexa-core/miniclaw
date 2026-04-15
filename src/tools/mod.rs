@@ -4,6 +4,8 @@ pub mod file_ops;
 pub mod get_time;
 pub mod http_fetch;
 pub mod memory_ops;
+#[allow(dead_code)]
+pub mod perception_tools;
 pub mod registry;
 #[allow(dead_code)]
 pub mod robot_actions;

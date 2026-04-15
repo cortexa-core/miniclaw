@@ -43,6 +43,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Misc
+base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 rust-embed = "8"
@@ -59,6 +60,7 @@ filetime = "0.2"
 [features]
 default = []
 telegram = ["teloxide"]
+camera = []
 serial = ["dep:tokio-serial"]
 
 [profile.release]
